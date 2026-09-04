@@ -1,0 +1,11 @@
+# Local development ledger, tenants, and billing-event data.
+data/
+
+# OAuth, billing, and admin secrets.
+.env
+.env.*
+!.env.example
+
+# Node and operating-system artifacts.
+node_modules/
+.DS_Store
