@@ -1,23 +1,48 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { payableInr, metalByPurity, assertPurity } from './ledger-math.js';
 
 // Development adapter for customer-owned Google Sheets/Drive data.
 // It is intentionally separate from ControlPlane and must be replaced in production.
 export class LedgerStore {
-  constructor(filePath = null) { this.filePath = filePath; this.data = new Map(); if (filePath && existsSync(filePath)) this.data = new Map(Object.entries(JSON.parse(readFileSync(filePath, 'utf8')))); }
+  constructor(filePath = null) {
+    this.filePath = filePath;
+    this.data = new Map();
+    if (filePath && existsSync(filePath)) this.data = new Map(Object.entries(JSON.parse(readFileSync(filePath, 'utf8'))));
+  }
   persist() { if (this.filePath) writeFileSync(this.filePath, JSON.stringify(Object.fromEntries(this.data), null, 2)); }
   bucket(tenantId) {
-    if (!this.data.has(tenantId)) this.data.set(tenantId, { suppliers: [], transactions: [], settlements: [] });
-    return this.data.get(tenantId);
+    if (!this.data.has(tenantId)) this.data.set(tenantId, { suppliers: [], money: [], metal: [], settlements: [] });
+    const b = this.data.get(tenantId);
+    b.suppliers ||= []; b.money ||= []; b.metal ||= []; b.settlements ||= [];
+    return b;
   }
   list(tenantId, kind) { return structuredClone(this.bucket(tenantId)[kind]); }
   add(tenantId, kind, value) {
+    if (kind === 'metal') assertPurity(value.metalType, value.purity);
+    if (kind === 'settlements' && Number(value.metalGrams || 0) > 0) assertPurity(value.metalType, value.purity);
     const item = { id: randomUUID(), createdAt: new Date().toISOString(), ...value };
     this.bucket(tenantId)[kind].unshift(item);
     this.persist();
     return structuredClone(item);
   }
+  addSupplier(tenantId, { name, phone = '', notes = '', openingMoney = 0, openingMetal = [] } = {}) {
+    const supplier = this.add(tenantId, 'suppliers', { name, phone, notes, status: 'ACTIVE' });
+    if (Number(openingMoney) > 0) {
+      this.add(tenantId, 'money', { supplierId: supplier.id, type: 'OPENING', amountInr: Number(openingMoney), date: new Date().toISOString().slice(0, 10) });
+    }
+    for (const row of openingMetal) {
+      if (Number(row.weightGrams) > 0) {
+        this.add(tenantId, 'metal', {
+          supplierId: supplier.id, direction: 'OPENING', metalType: row.metalType, purity: row.purity,
+          weightGrams: Number(row.weightGrams), date: new Date().toISOString().slice(0, 10)
+        });
+      }
+    }
+    return this.list(tenantId, 'suppliers').find((s) => s.id === supplier.id);
+  }
   update(tenantId, kind, id, value) {
+    if (kind !== 'suppliers') throw new Error('money, metal, and settlements are append-only');
     const items = this.bucket(tenantId)[kind];
     const index = items.findIndex((item) => item.id === id);
     if (index < 0) throw new Error(`${kind} item not found`);
@@ -33,11 +58,46 @@ export class LedgerStore {
     return [columns.join(','), ...items.map((item) => columns.map((column) => quote(item[column])).join(','))].join('\n');
   }
   deleteTenantData(tenantId) { this.data.delete(tenantId); this.persist(); }
+  supplierLedger(tenantId, supplierId) {
+    const money = this.list(tenantId, 'money');
+    const metal = this.list(tenantId, 'metal');
+    const settlements = this.list(tenantId, 'settlements');
+    const supplier = this.list(tenantId, 'suppliers').find((s) => s.id === supplierId);
+    return {
+      supplier,
+      payable: payableInr(money, settlements, supplierId),
+      metalByPurity: metalByPurity(metal, settlements, supplierId),
+      money: money.filter((r) => r.supplierId === supplierId),
+      metal: metal.filter((r) => r.supplierId === supplierId),
+      settlements: settlements.filter((r) => r.supplierId === supplierId)
+    };
+  }
   summary(tenantId) {
-    const transactions = this.bucket(tenantId).transactions;
-    const totalPurchases = transactions.filter((item) => item.type === 'PURCHASE').reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const totalPayments = transactions.filter((item) => item.type === 'PAYMENT').reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const metalTransactions = transactions.filter((item) => item.metalType).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    return { supplierCount: this.bucket(tenantId).suppliers.length, transactionCount: transactions.length, totalPurchases, totalPayments, metalTransactions, outstanding: totalPurchases - totalPayments };
+    const suppliers = this.list(tenantId, 'suppliers');
+    const money = this.list(tenantId, 'money');
+    const metal = this.list(tenantId, 'metal');
+    const settlements = this.list(tenantId, 'settlements');
+    const outstanding = suppliers.reduce((sum, s) => sum + payableInr(money, settlements, s.id), 0);
+    const totalPurchases = money.filter((r) => r.type === 'PURCHASE').reduce((sum, r) => sum + Number(r.amountInr || 0), 0);
+    const totalPayments = money.filter((r) => r.type === 'PAYMENT').reduce((sum, r) => sum + Number(r.amountInr || 0), 0);
+    const metalByPurityShop = {};
+    for (const s of suppliers) {
+      for (const [k, v] of Object.entries(metalByPurity(metal, settlements, s.id))) {
+        metalByPurityShop[k] = (metalByPurityShop[k] || 0) + v;
+      }
+    }
+    const nameById = Object.fromEntries(suppliers.map((s) => [s.id, s.name]));
+    const recentMoney = money.slice(0, 5).map((row) => ({ ...row, supplierName: nameById[row.supplierId] || '' }));
+    return {
+      supplierCount: suppliers.length,
+      moneyCount: money.length,
+      metalCount: metal.length,
+      settlementCount: settlements.length,
+      outstanding,
+      totalPurchases,
+      totalPayments,
+      metalByPurity: metalByPurityShop,
+      recentMoney
+    };
   }
 }
