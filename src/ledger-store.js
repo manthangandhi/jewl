@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { payableInr, metalByPurity, assertPurity } from './ledger-math.js';
 
+const LEDGER_KINDS = ['suppliers', 'money', 'metal', 'settlements'];
+const SUPPLIER_UPDATE_FIELDS = ['name', 'phone', 'notes', 'status'];
+
 // Development adapter for customer-owned Google Sheets/Drive data.
 // It is intentionally separate from ControlPlane and must be replaced in production.
 export class LedgerStore {
@@ -19,9 +22,10 @@ export class LedgerStore {
   }
   list(tenantId, kind) { return structuredClone(this.bucket(tenantId)[kind]); }
   add(tenantId, kind, value) {
+    if (!LEDGER_KINDS.includes(kind)) throw new Error(`unknown ledger kind: ${kind}`);
     if (kind === 'metal') assertPurity(value.metalType, value.purity);
     if (kind === 'settlements' && Number(value.metalGrams || 0) > 0) assertPurity(value.metalType, value.purity);
-    const item = { id: randomUUID(), createdAt: new Date().toISOString(), ...value };
+    const item = { ...value, id: randomUUID(), createdAt: new Date().toISOString() };
     this.bucket(tenantId)[kind].unshift(item);
     this.persist();
     return structuredClone(item);
@@ -46,7 +50,11 @@ export class LedgerStore {
     const items = this.bucket(tenantId)[kind];
     const index = items.findIndex((item) => item.id === id);
     if (index < 0) throw new Error(`${kind} item not found`);
-    items[index] = { ...items[index], ...value, updatedAt: new Date().toISOString() };
+    const patch = {};
+    for (const field of SUPPLIER_UPDATE_FIELDS) {
+      if (value[field] !== undefined) patch[field] = value[field];
+    }
+    items[index] = { ...items[index], ...patch, updatedAt: new Date().toISOString() };
     this.persist();
     return structuredClone(items[index]);
   }

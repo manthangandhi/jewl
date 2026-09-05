@@ -50,3 +50,41 @@ test('exportCSV includes money rows', () => {
   assert.match(csv, /OPENING/);
   assert.ok(csv.includes(supplier.id));
 });
+
+test('add ignores caller-provided ids and update cannot change supplier id', () => {
+  const ledger = new LedgerStore();
+  const money = ledger.add('t1', 'money', { id: 'forged', type: 'PURCHASE', amountInr: 1, date: '2026-01-02' });
+  assert.notEqual(money.id, 'forged');
+  assert.ok(money.id);
+  const supplier = ledger.addSupplier('t1', { name: 'A' });
+  const updated = ledger.update('t1', 'suppliers', supplier.id, { id: 'hijacked', name: 'B', extra: 'drop' });
+  assert.equal(updated.id, supplier.id);
+  assert.equal(updated.name, 'B');
+  assert.equal(updated.extra, undefined);
+  assert.equal(ledger.list('t1', 'suppliers')[0].id, supplier.id);
+});
+
+test('invalid metal and settlement purity throws', () => {
+  const ledger = new LedgerStore();
+  const supplier = ledger.addSupplier('t1', { name: 'A' });
+  assert.throws(
+    () => ledger.add('t1', 'metal', { supplierId: supplier.id, direction: 'ISSUE', metalType: 'GOLD', purity: '925', weightGrams: 1 }),
+    /purity/
+  );
+  assert.throws(
+    () => ledger.add('t1', 'settlements', { supplierId: supplier.id, moneyAmountInr: 1, metalType: 'GOLD', metalGrams: 1 }),
+    /purity/
+  );
+});
+
+test('update on metal and settlements is append-only', () => {
+  const ledger = new LedgerStore();
+  assert.throws(() => ledger.update('t1', 'metal', 'x', {}), /append-only/);
+  assert.throws(() => ledger.update('t1', 'settlements', 'x', {}), /append-only/);
+});
+
+test('add rejects unknown journal kinds', () => {
+  const ledger = new LedgerStore();
+  assert.throws(() => ledger.add('t1', 'transactions', { amount: 1 }), /kind/);
+});
+
