@@ -9,3 +9,6 @@ data/
 # Node and operating-system artifacts.
 node_modules/
 .DS_Store
+
+# Visual brainstorming companion sessions.
+.superpowers/
