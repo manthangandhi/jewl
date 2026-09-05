@@ -19,7 +19,7 @@ const HEADERS = {
 };
 const REQUIRED = {
   suppliers: ['id', 'name'],
-  money: ['id', 'type'],
+  money: ['id', 'type', 'supplierId'],
   metal: ['id', 'direction', 'metalType', 'purity'],
   settlements: ['id']
 };

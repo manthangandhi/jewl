@@ -106,3 +106,59 @@ test('missing spreadsheet on get is a recreate signal, not a delete', async () =
   assert.ok(sheets.has(id));
   assert.equal(calls.some((c) => c.method === 'DELETE'), false);
 });
+
+test('ensureSpreadsheet writes _Meta and Suppliers header rows', async () => {
+  const { fetchImpl, sheets } = memoryGoogle();
+  const ledger = new SheetsLedger({ fetchImpl, accessToken: 'tok' });
+  await ledger.ensureSpreadsheet({ businessName: 'Mehta Jewellers' });
+  const book = [...sheets.values()][0];
+  assert.deepEqual(book.tabs._Meta[0], ['schemaVersion', 'createdAt']);
+  assert.equal(String(book.tabs._Meta[1][0]), '1');
+  assert.deepEqual(book.tabs.Suppliers[0], ['id', 'name', 'phone', 'notes', 'status', 'createdAt']);
+});
+
+test('sheets requests send Authorization Bearer token', async () => {
+  const { fetchImpl, calls } = memoryGoogle();
+  const ledger = new SheetsLedger({ fetchImpl, accessToken: 'tok' });
+  await ledger.ensureSpreadsheet({ businessName: 'Shop' });
+  assert.ok(calls.length > 0);
+  for (const call of calls) {
+    assert.equal(call.headers.Authorization, 'Bearer tok');
+  }
+});
+
+test('update is append-only except supplier phone edits', async () => {
+  const { fetchImpl } = memoryGoogle();
+  const ledger = new SheetsLedger({ fetchImpl, accessToken: 'tok' });
+  await ledger.ensureSpreadsheet({ businessName: 'Shop' });
+  const supplier = await ledger.addSupplier(null, { name: 'A' });
+  await assert.rejects(() => ledger.update(null, 'money', supplier.id, {}), /append-only/);
+  const updated = await ledger.update(null, 'suppliers', supplier.id, { phone: '1' });
+  assert.equal(updated.phone, '1');
+  assert.equal((await ledger.list(null, 'suppliers'))[0].phone, '1');
+});
+
+test('list skips money rows missing supplierId instead of throwing', async () => {
+  const { fetchImpl, sheets } = memoryGoogle();
+  const ledger = new SheetsLedger({ fetchImpl, accessToken: 'tok' });
+  const id = await ledger.ensureSpreadsheet({ businessName: 'Shop' });
+  const money = sheets.get(id).tabs.Money;
+  money.push(
+    ['ok-1', '2026-01-02', 's1', 'PURCHASE', 10, '', '2026-01-02T00:00:00.000Z'],
+    ['bad-1', '2026-01-02', '', 'PURCHASE', 99, '', '2026-01-02T00:00:00.000Z']
+  );
+  const rows = await ledger.list(null, 'money');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'ok-1');
+  assert.equal(rows[0].supplierId, 's1');
+});
+
+test('ensureSpreadsheet returns existing id when GET succeeds', async () => {
+  const { fetchImpl, sheets } = memoryGoogle();
+  const ledger = new SheetsLedger({ fetchImpl, accessToken: 'tok' });
+  const id = await ledger.ensureSpreadsheet({ businessName: 'Shop' });
+  const size = sheets.size;
+  const again = await ledger.ensureSpreadsheet({ spreadsheetId: id, businessName: 'Other' });
+  assert.equal(again, id);
+  assert.equal(sheets.size, size);
+});
