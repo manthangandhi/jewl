@@ -155,7 +155,112 @@ test('GET /api/me without cookie is 401 with Sign in required', async () => {
   try {
     const res = await fetch(`${ctx.url}/api/me`);
     assert.equal(res.status, 401);
-    assert.deepEqual(await res.json(), { error: 'Sign in required' });
+    const body = await res.json();
+    assert.equal(body.error, 'Sign in required');
+    assert.equal(body.localMode, true);
+  } finally { ctx.server.close(); }
+});
+
+test('GET /api/me 401 includes localMode false when Google is configured', async () => {
+  const ctx = await start({
+    env: { GOOGLE_CLIENT_ID: 'cid.apps.googleusercontent.com' }
+  });
+  try {
+    const res = await fetch(`${ctx.url}/api/me`);
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.error, 'Sign in required');
+    assert.equal(body.localMode, false);
+  } finally { ctx.server.close(); }
+});
+
+test('READY tenant recreates missing spreadsheet and retries list', async () => {
+  let listCalls = 0;
+  const ensureCalls = [];
+  const stubLedger = {
+    async list() {
+      listCalls += 1;
+      if (listCalls === 1) throw new Error('missing spreadsheet');
+      return [{ id: 's1', name: 'Karigar' }];
+    },
+    async ensureSpreadsheet(args) { ensureCalls.push(args); return 'ss_new'; },
+    add() { return {}; }, addSupplier() { return {}; },
+    update() { return {}; }, summary() { return {}; }, supplierLedger() { return {}; }, exportCSV() { return ''; }
+  };
+  const ctx = await start({ ledger: stubLedger });
+  try {
+    const tenant = createTenant({ id: 't1', businessName: 'Mehta', ownerUserId: 'u1' });
+    tenant.setupStatus = 'READY';
+    tenant.spreadsheetId = 'ss_old';
+    ctx.controlPlane.saveTenant(tenant);
+    ctx.controlPlane.saveUser(createUser({ id: 'u1', tenantId: 't1', email: 'o@x.com', googleSubjectId: 'sub', name: 'O' }));
+    const { header } = ctx.sessions.create({ userId: 'u1', tenantId: 't1' });
+    const cookie = header.split(';')[0];
+    const res = await fetch(`${ctx.url}/api/me/suppliers`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), [{ id: 's1', name: 'Karigar' }]);
+    assert.equal(listCalls, 2);
+    assert.equal(ensureCalls.length, 1);
+    assert.equal(ensureCalls[0].spreadsheetId, 'ss_old');
+    assert.equal(ensureCalls[0].businessName, 'Mehta');
+    assert.equal(ctx.controlPlane.getTenant('t1').spreadsheetId, 'ss_new');
+  } finally { ctx.server.close(); }
+});
+
+test('blocked tenant cannot use GET /api/me or exports', async () => {
+  const ctx = await start();
+  try {
+    const tenant = createTenant({ id: 't1', businessName: 'Mehta', ownerUserId: 'u1' });
+    tenant.setupStatus = 'READY';
+    tenant.subscriptionStatus = 'ADMIN_BLOCKED';
+    tenant.status = 'BLOCKED';
+    ctx.controlPlane.saveTenant(tenant);
+    ctx.controlPlane.saveUser(createUser({ id: 'u1', tenantId: 't1', email: 'o@x.com', googleSubjectId: 'sub', name: 'O' }));
+    const { header } = ctx.sessions.create({ userId: 'u1', tenantId: 't1' });
+    const cookie = header.split(';')[0];
+    const me = await fetch(`${ctx.url}/api/me`, { headers: { cookie } });
+    assert.notEqual(me.status, 200);
+    assert.ok(me.status === 400 || me.status === 403);
+    const meBody = await me.json();
+    assert.match(meBody.error, /Account is blocked/);
+    const exportRes = await fetch(`${ctx.url}/api/me/export?kind=suppliers`, { headers: { cookie } });
+    assert.notEqual(exportRes.status, 200);
+    assert.ok(exportRes.status === 400 || exportRes.status === 403);
+    const exportBody = await exportRes.json();
+    assert.match(exportBody.error, /Account is blocked/);
+  } finally { ctx.server.close(); }
+});
+
+test('OAuth callback fails closed without TOKEN_ENCRYPTION_KEY', async () => {
+  const ctx = await start({
+    env: {
+      GOOGLE_CLIENT_ID: 'cid.apps.googleusercontent.com',
+      GOOGLE_CLIENT_SECRET: 'secret',
+      GOOGLE_REDIRECT_URI: 'http://localhost:3000/auth/google/callback',
+      TOKEN_ENCRYPTION_KEY: ''
+    },
+    oauth: {
+      googleAuthUrl() { return 'https://accounts.google.com/o/oauth2/v2/auth?client_id=cid'; },
+      async exchangeCode() {
+        return {
+          googleSubjectId: 'sub-plain',
+          email: 'a@b.com',
+          name: 'A',
+          accessToken: 'at',
+          refreshToken: 'plaintext-refresh-token'
+        };
+      }
+    }
+  });
+  try {
+    const startAuth = await fetch(`${ctx.url}/auth/google`, { redirect: 'manual' });
+    assert.equal(startAuth.status, 302);
+    const res = await fetch(`${ctx.url}/auth/google/callback?code=abc`, { redirect: 'manual' });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error || '', /TOKEN_ENCRYPTION_KEY|encryption/i);
+    assert.equal(ctx.controlPlane.users.values().length, 0);
+    assert.ok(!JSON.stringify(ctx.controlPlane.users.values()).includes('plaintext-refresh-token'));
   } finally { ctx.server.close(); }
 });
 

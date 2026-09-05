@@ -121,8 +121,15 @@ export function createApp(deps = {}) {
     }
   }
 
+  function requireEncryptionKey() {
+    if (googleEnabled && !env.TOKEN_ENCRYPTION_KEY) {
+      throw new Error('TOKEN_ENCRYPTION_KEY is required');
+    }
+  }
+
   function packRefresh(token) {
     if (!token) return token;
+    requireEncryptionKey();
     if (!env.TOKEN_ENCRYPTION_KEY) return token;
     return encryptSecret(token, env.TOKEN_ENCRYPTION_KEY);
   }
@@ -147,8 +154,25 @@ export function createApp(deps = {}) {
     }
   }
 
+  function isMissingSpreadsheet(error) {
+    return /missing spreadsheet/i.test(error?.message || '');
+  }
+
+  function wrapLedgerMethods(adapter, wrap) {
+    return {
+      ensureSpreadsheet: typeof adapter.ensureSpreadsheet === 'function' ? wrap('ensureSpreadsheet') : undefined,
+      list: wrap('list'),
+      add: wrap('add'),
+      addSupplier: wrap('addSupplier'),
+      update: wrap('update'),
+      summary: wrap('summary'),
+      supplierLedger: wrap('supplierLedger'),
+      exportCSV: wrap('exportCSV')
+    };
+  }
+
   function withTokenRefresh(sheets, session) {
-    const retry = (method) => async (...args) => {
+    return wrapLedgerMethods(sheets, (method) => async (...args) => {
       try {
         return await sheets[method](...args);
       } catch (error) {
@@ -156,27 +180,50 @@ export function createApp(deps = {}) {
         await refreshSessionToken(session, sheets);
         return await sheets[method](...args);
       }
+    });
+  }
+
+  function withSpreadsheetRecreate(adapter, session, tenant) {
+    const retry = (method) => async (...args) => {
+      try {
+        return await adapter[method](...args);
+      } catch (error) {
+        if (method === 'ensureSpreadsheet' || !isMissingSpreadsheet(error)) throw error;
+        if (tenant?.setupStatus !== 'READY') throw error;
+        if (typeof adapter.ensureSpreadsheet !== 'function') throw error;
+        const spreadsheetId = await adapter.ensureSpreadsheet({
+          accessToken: session.accessToken,
+          businessName: tenant.businessName,
+          spreadsheetId: tenant.spreadsheetId
+        });
+        tenant.spreadsheetId = spreadsheetId;
+        tenant.updatedAt = new Date().toISOString();
+        controlPlane.saveTenant(tenant);
+        return await adapter[method](...args);
+      }
     };
-    return {
-      ensureSpreadsheet: retry('ensureSpreadsheet'),
-      list: retry('list'),
-      add: retry('add'),
-      addSupplier: retry('addSupplier'),
-      update: retry('update'),
-      summary: retry('summary'),
-      supplierLedger: retry('supplierLedger'),
-      exportCSV: retry('exportCSV')
-    };
+    return wrapLedgerMethods(adapter, retry);
   }
 
   function resolveLedger(session, tenant) {
-    if (!googleEnabled) return injectedLedger;
-    if (!session?.accessToken) throw new Error('Google sign-in required');
-    const sheets = new SheetsLedger({
-      accessToken: session.accessToken,
-      spreadsheetId: tenant?.spreadsheetId
-    });
-    return withTokenRefresh(sheets, session);
+    let adapter;
+    if (!googleEnabled) {
+      adapter = injectedLedger;
+    } else {
+      if (!session?.accessToken) throw new Error('Google sign-in required');
+      const sheets = new SheetsLedger({
+        accessToken: session.accessToken,
+        spreadsheetId: tenant?.spreadsheetId
+      });
+      adapter = withTokenRefresh(sheets, session);
+    }
+    return withSpreadsheetRecreate(adapter, session, tenant);
+  }
+
+  function assertCanUseApplication(tenantId) {
+    if (tenantId && !entitlements.canUseApplication(tenantId)) {
+      throw new Error('Account is blocked');
+    }
   }
 
   function ownerEmailFor(tenant) {
@@ -288,6 +335,7 @@ export function createApp(deps = {}) {
       }
 
       if (method === 'GET' && pathname === '/auth/google/callback') {
+        requireEncryptionKey();
         const code = url.searchParams.get('code');
         if (!code) return json(response, 400, { error: 'Missing authorization code' });
         const tokens = await oauth.exchangeCode({
@@ -332,6 +380,7 @@ export function createApp(deps = {}) {
 
       if (method === 'GET' && pathname === '/api/me') {
         const { session } = requireSession(request);
+        assertCanUseApplication(session.tenantId);
         return json(response, 200, mePayload(session));
       }
 
@@ -347,6 +396,7 @@ export function createApp(deps = {}) {
         const tenantId = session.tenantId;
         const tenant = controlPlane.getTenant(tenantId);
         if (!tenant) throw new Error('Tenant not found');
+        assertCanUseApplication(tenantId);
         const ledger = resolveLedger(session, tenant);
         tenant.lastAccessAt = new Date().toISOString();
         controlPlane.saveTenant(tenant);
@@ -547,7 +597,9 @@ export function createApp(deps = {}) {
       const status = error.status
         || (error.message === 'Sign in required' || error.message === 'Admin authentication required' ? 401 : null)
         || (/not found/i.test(error.message || '') ? 404 : 400);
-      return json(response, status, { error: error.message });
+      const body = { error: error.message };
+      if (status === 401 && error.message === 'Sign in required') body.localMode = !googleEnabled;
+      return json(response, status, body);
     }
   });
 }

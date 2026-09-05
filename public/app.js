@@ -47,6 +47,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = Error(data.error || 'Request failed');
     error.status = response.status;
+    error.payload = data;
     throw error;
   }
   return data;
@@ -63,19 +64,21 @@ function supplierSelect(selected) {
 }
 
 function landing() {
-  root.innerHTML = `<main class="onboard"><section class="onboard-card">
-    <div class="brand"><span class="brand-mark">K</span> karigar</div>
-    <h1>Bring clarity to every gram.</h1>
-    <p>Track suppliers, payments and metal balances in one calm workspace. Sign in with Google to keep the ledger in your Drive.</p>
-    ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
-    <p style="margin-top:22px"><a class="btn btn-primary" href="/auth/google">Continue with Google</a></p>
+  const localForm = state.localMode === true ? `
     <div class="eyebrow" style="margin-top:28px">LOCAL DEVELOPMENT MODE</div>
     <div class="notice">Data is currently saved only in this app's local <code>data/</code> folder when Google is not configured. It is not being sent to Google Sheets until Google OAuth is connected.</div>
     <form id="onboard-form">
       <label>Business name<input name="businessName" placeholder="e.g. Mehta Jewellers" required></label>
       <label>Owner email (local profile)<input name="email" type="email" placeholder="owner@shop.com" required></label>
       <button class="btn btn-primary">Create local workspace</button>
-    </form>
+    </form>` : '';
+  root.innerHTML = `<main class="onboard"><section class="onboard-card">
+    <div class="brand"><span class="brand-mark">K</span> karigar</div>
+    <h1>Bring clarity to every gram.</h1>
+    <p>Track suppliers, payments and metal balances in one calm workspace. Sign in with Google to keep the ledger in your Drive.</p>
+    ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
+    <p style="margin-top:22px"><a class="btn btn-primary" href="/auth/google">Continue with Google</a></p>
+    ${localForm}
     <p><a href="/data-ownership">Read the planned Google data-ownership model</a></p>
   </section></main>`;
   bind();
@@ -112,6 +115,7 @@ async function bootstrap() {
   } catch (error) {
     if (error.status === 401 || error.message === 'Sign in required') {
       state.me = null;
+      state.localMode = error.payload?.localMode === true;
       return landing();
     }
     return showError(error);
