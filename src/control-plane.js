@@ -2,7 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 const FORBIDDEN_KEYS = new Set([
   'supplierName', 'suppliers', 'goldBalance', 'silverBalance', 'metalBalances', 'purchaseAmount',
-  'transactions', 'supplierTransactions', 'supplierPayments', 'supplierInvoices', 'documents', 'ledger'
+  'transactions', 'supplierTransactions', 'supplierPayments', 'supplierInvoices', 'documents', 'ledger',
+  'amountInr', 'weightGrams', 'purity', 'metalType', 'metalGrams', 'openingBalance', 'phone', 'supplierId'
 ]);
 
 function assertPlatformMetadata(value, path = '') {
@@ -26,11 +27,16 @@ export class MetadataStore {
 }
 
 export class ControlPlane {
-  constructor({ plans = new MetadataStore(), tenants = new MetadataStore(), events = new MetadataStore() } = {}) {
-    this.plans = plans; this.tenants = tenants; this.events = events;
+  constructor({ plans = new MetadataStore(), tenants = new MetadataStore(), events = new MetadataStore(), users = new MetadataStore() } = {}) {
+    this.plans = plans; this.tenants = tenants; this.events = events; this.users = users;
   }
   savePlan(plan) { return this.plans.set(plan.id, plan); }
   saveTenant(tenant) { return this.tenants.set(tenant.id, tenant); }
   getTenant(id) { return this.tenants.get(id); }
   deleteTenant(id) { this.tenants.delete(id); }
+  saveUser(user) { return this.users.set(user.id, user); }
+  getUser(id) { return this.users.get(id); }
+  findUserByGoogleSubject(googleSubjectId) {
+    return this.users.values().find((user) => user.googleSubjectId === googleSubjectId);
+  }
 }
