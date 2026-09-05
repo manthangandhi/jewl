@@ -134,6 +134,22 @@ test('POST /api/setup with a pending Google session creates a tenant and spreads
   } finally { ctx.server.close(); }
 });
 
+test('admin can extend trial and block without ledger fields in the payload', async () => {
+  const ctx = await start();
+  try {
+    const tenant = createTenant({ id: 't1', businessName: 'Mehta', ownerUserId: 'u1' });
+    ctx.controlPlane.saveTenant(tenant);
+    ctx.controlPlane.saveUser(createUser({ id: 'u1', tenantId: 't1', email: 'owner@shop.com', googleSubjectId: 'sub', name: 'O' }));
+    const headers = { 'x-admin-key': 'local-admin', 'content-type': 'application/json' };
+    const trial = await fetch(`${ctx.url}/api/admin/tenants/t1/trial`, { method: 'POST', headers, body: JSON.stringify({ days: 7 }) });
+    assert.equal(trial.status, 200);
+    const list = await (await fetch(`${ctx.url}/api/admin/tenants`, { headers })).json();
+    assert.equal(list[0].ownerEmail, 'owner@shop.com');
+    assert.ok(!('suppliers' in list[0]));
+    assert.ok(!('amountInr' in list[0]));
+  } finally { ctx.server.close(); }
+});
+
 test('GET /api/me without cookie is 401 with Sign in required', async () => {
   const ctx = await start();
   try {

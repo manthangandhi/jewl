@@ -1,1 +1,113 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Karigar admin</title><link rel="stylesheet" href="/styles.css"></head><body><main class="onboard"><section class="onboard-card"><div class="brand"><span class="brand-mark">K</span> karigar admin</div><div class="eyebrow">CONTROL PLANE</div><h1>Commercial overview</h1><p id="message">Loading platform metadata...</p><div id="metrics" class="grid stats"></div><div id="tenants" class="list"></div></section></main><script type="module">const out=document.querySelector('#message'),metrics=document.querySelector('#metrics'),tenants=document.querySelector('#tenants');const headers={'x-admin-key':prompt('Admin key','local-admin')||''};try{const [a,t]=await Promise.all([fetch('/api/admin/overview',{headers}),fetch('/api/admin/tenants',{headers})]);if(!a.ok)throw Error((await a.json()).error);const overview=await a.json(),rows=await t.json();out.textContent='Platform metadata only. Customer ledger data is not shown here.';metrics.innerHTML=[['Tenants',overview.totalTenants],['Paid',overview.activeSubscriptions],['Trials',overview.trials],['MRR',`INR ${overview.mrr.toLocaleString('en-IN')}`]].map(([label,value])=>`<div class="card"><span class="stat-label">${label}</span><div class="stat-value">${value}</div></div>`).join('');tenants.innerHTML=rows.map(x=>`<div class="row"><div><strong>${x.businessName}</strong><small>${x.ownerUserId}</small></div><span class="pill">${x.subscriptionStatus}</span></div>`).join('')||'<div class="empty">No tenants yet.</div>'}catch(e){out.textContent=e.message}</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Karigar admin</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .onboard-card { width: min(880px, 100%); }
+    .row { grid-template-columns: 1fr auto; align-items: start; }
+    .tenant-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+  <main class="onboard">
+    <section class="onboard-card">
+      <div class="brand"><span class="brand-mark">K</span> karigar admin</div>
+      <div class="eyebrow">CONTROL PLANE</div>
+      <h1>Commercial overview</h1>
+      <p id="message">Loading platform metadata...</p>
+      <div id="metrics" class="grid stats"></div>
+      <div id="tenants" class="list"></div>
+    </section>
+  </main>
+  <script type="module">
+    const out = document.querySelector('#message');
+    const metrics = document.querySelector('#metrics');
+    const tenants = document.querySelector('#tenants');
+    const headers = {
+      'x-admin-key': prompt('Admin key', 'local-admin') || '',
+      'content-type': 'application/json'
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function formatDate(value) {
+      if (!value) return 'No trial end';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-IN');
+    }
+
+    async function load() {
+      const [overviewRes, tenantRes] = await Promise.all([
+        fetch('/api/admin/overview', { headers }),
+        fetch('/api/admin/tenants', { headers })
+      ]);
+      if (!overviewRes.ok) throw Error((await overviewRes.json()).error);
+      if (!tenantRes.ok) throw Error((await tenantRes.json()).error);
+      const overview = await overviewRes.json();
+      const rows = await tenantRes.json();
+      out.textContent = 'Platform metadata only. Customer ledger data is not shown here.';
+      metrics.innerHTML = [
+        ['Tenants', overview.totalTenants],
+        ['Paid', overview.activeSubscriptions],
+        ['Trials', overview.trials],
+        ['MRR', `INR ${Number(overview.mrr || 0).toLocaleString('en-IN')}`]
+      ].map(([label, value]) => `<div class="card"><span class="stat-label">${label}</span><div class="stat-value">${value}</div></div>`).join('');
+      tenants.innerHTML = rows.map((tenant) => `
+        <div class="row">
+          <div>
+            <strong>${escapeHtml(tenant.businessName)}</strong>
+            <small>${escapeHtml(tenant.ownerEmail || 'No owner email')}</small>
+            <small>Trial end: ${escapeHtml(formatDate(tenant.trialEndsAt))}</small>
+          </div>
+          <div>
+            <span class="pill">${escapeHtml(tenant.subscriptionStatus)}</span>
+            <div class="tenant-actions">
+              <button class="btn btn-soft" data-id="${escapeHtml(tenant.id)}" data-action="trial">Extend trial</button>
+              <button class="btn btn-soft" data-id="${escapeHtml(tenant.id)}" data-action="comp">Comp</button>
+              <button class="btn btn-soft" data-id="${escapeHtml(tenant.id)}" data-action="block">Block</button>
+              <button class="btn btn-soft" data-id="${escapeHtml(tenant.id)}" data-action="reactivate">Reactivate</button>
+            </div>
+          </div>
+        </div>
+      `).join('') || '<div class="empty">No tenants yet.</div>';
+    }
+
+    async function act(id, action) {
+      const body = {};
+      if (action === 'trial') {
+        body.days = Number(prompt('Extend trial by how many days?', '7') || 7);
+      }
+      if (action === 'comp') {
+        body.reason = prompt('Complimentary access reason', 'Complimentary access') || 'Complimentary access';
+      }
+      const res = await fetch(`/api/admin/tenants/${id}/${action}`, {
+        method: 'POST', headers, body: JSON.stringify(body)
+      });
+      if (!res.ok) throw Error((await res.json()).error);
+      await load();
+    }
+
+    try {
+      await load();
+      tenants.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-action]');
+        if (!button) return;
+        try {
+          await act(button.dataset.id, button.dataset.action);
+        } catch (error) {
+          out.textContent = error.message;
+        }
+      });
+    } catch (error) {
+      out.textContent = error.message;
+    }
+  </script>
+</body>
+</html>
