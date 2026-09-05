@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AccountMode, SubscriptionEntitlementService, SubscriptionStatus, createTenant, defaultPlan } from '../src/domain.js';
+import { AccountMode, SubscriptionEntitlementService, SubscriptionStatus, createTenant, createUser, defaultPlan } from '../src/domain.js';
 import { ControlPlane } from '../src/control-plane.js';
 import { BillingWebhookService } from '../src/billing.js';
 import { RazorpayWebhookProvider } from '../src/billing.js';
@@ -49,4 +49,42 @@ test('Razorpay webhook signatures are verified', () => {
   const signature = createHmac('sha256', 'secret').update(body).digest('hex');
   assert.equal(provider.verifyWebhook(body, signature).id, 'evt1');
   assert.throws(() => provider.verifyWebhook(body, 'bad'), /Invalid webhook signature/);
+});
+
+test('createUser is an owner bound to a tenant', () => {
+  const user = createUser({
+    id: 'u1', tenantId: 't1', email: 'a@b.com', googleSubjectId: 'sub1', name: 'A', now: new Date('2026-01-01')
+  });
+  assert.equal(user.role, 'OWNER');
+  assert.equal(user.googleSubjectId, 'sub1');
+  assert.equal(user.status, 'ACTIVE');
+});
+
+test('new tenants start pending Google ledger setup', () => {
+  const { tenant } = fixture();
+  assert.equal(tenant.setupStatus, 'PENDING');
+  assert.equal(tenant.spreadsheetId, null);
+});
+
+test('default plan uses feature keys not display names', () => {
+  const features = defaultPlan().features;
+  assert.ok(features.includes('supplier_management'));
+  assert.ok(features.includes('transaction_entry'));
+  assert.ok(features.includes('metal_ledger'));
+  assert.ok(features.includes('settlements'));
+  assert.ok(features.includes('exports'));
+  assert.ok(!features.includes('SUPPLIERS'));
+});
+
+test('ADMIN_COMP has full write access', () => {
+  const { cp, service } = fixture();
+  cp.saveTenant({ ...cp.getTenant('t1'), subscriptionStatus: SubscriptionStatus.ADMIN_COMP });
+  assert.equal(service.getAccountMode('t1'), AccountMode.FULL_ACCESS);
+});
+
+test('ADMIN_BLOCKED cannot use the app', () => {
+  const { cp, service } = fixture();
+  cp.saveTenant({ ...cp.getTenant('t1'), subscriptionStatus: SubscriptionStatus.ADMIN_BLOCKED, status: 'BLOCKED' });
+  assert.equal(service.getAccountMode('t1'), AccountMode.BLOCKED);
+  assert.equal(service.canUseApplication('t1'), false);
 });

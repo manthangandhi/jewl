@@ -10,7 +10,7 @@ export const AccountMode = Object.freeze({ FULL_ACCESS: 'FULL_ACCESS', READ_ONLY
 export const defaultPlan = () => ({
   id: 'plan_pro', code: 'PRO', name: 'Pro', description: 'Full jewellery business operations',
   monthlyPrice: 1999, annualPrice: 19999, currency: 'INR', trialDays: 14, active: true,
-  features: ['SUPPLIERS', 'TRANSACTIONS', 'DASHBOARD', 'REPORTS', 'SETTLEMENTS', 'RECONCILIATION', 'AUDIT_LOG', 'EXPORTS'],
+  features: ['supplier_management', 'transaction_entry', 'metal_ledger', 'settlements', 'exports'],
   limits: { users: 5, branches: 1 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
 });
 
@@ -20,7 +20,15 @@ export function createTenant({ id, businessName, ownerUserId, plan = defaultPlan
   return { id, businessName, ownerUserId, status: 'ACTIVE', planId: plan.id,
     trialStartedAt: createdAt, trialEndsAt, subscriptionStatus: SubscriptionStatus.TRIALING,
     billingCustomerId: null, billingSubscriptionId: null, currentPeriodStart: null, currentPeriodEnd: null,
-    cancelAtPeriodEnd: false, gracePeriodEndsAt: null, googleConnected: false, createdAt, updatedAt: createdAt, lastAccessAt: null };
+    cancelAtPeriodEnd: false, gracePeriodEndsAt: null, googleConnected: false, spreadsheetId: null, setupStatus: 'PENDING',
+    createdAt, updatedAt: createdAt, lastAccessAt: null };
+}
+
+export function createUser({ id, tenantId, email, googleSubjectId, name, now = new Date() }) {
+  return {
+    id, tenantId, email, googleSubjectId, name, role: 'OWNER', status: 'ACTIVE',
+    createdAt: now.toISOString(), lastLoginAt: now.toISOString()
+  };
 }
 
 export class SubscriptionEntitlementService {
