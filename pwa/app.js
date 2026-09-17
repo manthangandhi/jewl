@@ -1,7 +1,7 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
-  buildDemoLedger, mergeDemoLedger, dedupePartyLedger, dealIsValid, splitDeal
+  buildDemoLedger, mergeDemoLedger, dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
@@ -65,7 +65,8 @@ const fmtDate = (v) => {
   return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 const nid = () => (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}`);
-const supplierName = (id) => state.suppliers.find((s) => s.id === id)?.name || '';
+const partyLabel = (party) => partyDisplayName(party) || 'Party';
+const supplierName = (id) => partyLabel(state.suppliers.find((s) => s.id === id) || {});
 const initials = (name) => {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] || 'P') + (parts[1]?.[0] || '')).toUpperCase();
@@ -174,7 +175,9 @@ function applyLoaded(data) {
     metalMaster: seedMetalMaster(Array.isArray(data.metalMaster) ? data.metalMaster : [])
   };
   const cleaned = dedupePartyLedger(incoming);
-  state.needsDedupeSave = cleaned.suppliers.length < incoming.suppliers.length;
+  const before = (incoming.suppliers || []).map((s) => `${s.id}|${s.name}|${s.phone}`).join(';');
+  const after = (cleaned.suppliers || []).map((s) => `${s.id}|${s.name}|${s.phone}`).join(';');
+  state.needsDedupeSave = before !== after;
   state.meta = cleaned.meta;
   state.shopName = data.shopName || cleaned.meta?.shopName || state.shopName;
   state.suppliers = cleaned.suppliers;
@@ -553,8 +556,8 @@ function partiesHome() {
     const metal = metalPills(row.metalByPurity);
     const party = state.suppliers.find((s) => s.id === row.id) || {};
     return `<button type="button" class="cell ${dir.tone}" data-supplier="${esc(row.id)}">
-        <span class="avatar">${esc(initials(row.name))}</span>
-        <span class="cell-main"><strong>${esc(row.name)}</strong>${party.phone ? `<small>${esc(party.phone)}</small>` : ''}${metal || ''}</span>
+        <span class="avatar">${esc(initials(partyLabel(party) !== 'Party' ? partyLabel(party) : partyLabel(row)))}</span>
+        <span class="cell-main"><strong>${esc(partyLabel({ ...row, ...party }))}</strong>${party.phone ? `<small>${esc(party.phone)}</small>` : ''}${metal || ''}</span>
         <span class="cell-trail ${dir.tone}">${dir.amount ? `<em>${dir.label}</em><b>${money(dir.amount)}</b>` : '<b class="zero">—</b>'}</span>
         ${ic('chevron')}
       </button>`;
@@ -609,9 +612,9 @@ function supplierPassbook() {
     <header class="party-head">
       <button class="icon-btn back" data-view="parties" type="button" aria-label="Back">${ic('chevron')}</button>
       <div class="party-id">
-        <span class="avatar lg">${esc(initials(detail.supplier.name))}</span>
+        <span class="avatar lg">${esc(initials(partyLabel(detail.supplier)))}</span>
         <div>
-          <h1>${esc(detail.supplier.name)}</h1>
+          <h1>${esc(partyLabel(detail.supplier))}</h1>
           ${detail.supplier.phone ? `<p>${esc(detail.supplier.phone)}</p>` : ''}
         </div>
       </div>
@@ -872,7 +875,7 @@ function dealModal(type) {
     <div class="section-head"><h2>${isPay ? 'Payment' : 'Purchase'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
     <p class="lede">Fill rupees, metal, or both. One party can have gold, silver, and any other metal on the same khata.</p>
     <form id="data-form" data-kind="deal">
-      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${(draft.supplierId || state.supplierId) === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${(draft.supplierId || state.supplierId) === s.id ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       <input type="hidden" name="type" value="${esc(isPay ? 'PAYMENT' : 'PURCHASE')}">
       <label>Amount ₹ (optional)<input name="amountInr" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Leave blank if metal only" value="${esc(draft.amountInr || '')}"></label>
       <div class="metal-block">
@@ -897,7 +900,7 @@ function moneyModal(type) {
   return `<div class="modal-backdrop"><section class="modal">
     <div class="section-head"><h2>${isEdit ? 'Edit entry' : (current === 'PAYMENT' ? 'Payment' : 'Purchase')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
     <form id="data-form" data-kind="money">
-      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Type<select name="type">
         <option value="OPENING" ${e.type === 'OPENING' ? 'selected' : ''}>Opening</option>
         <option value="PURCHASE" ${current === 'PURCHASE' ? 'selected' : ''}>Purchase</option>
@@ -923,7 +926,7 @@ function metalModal(direction) {
   return `<div class="modal-backdrop"><section class="modal">
     <div class="section-head"><h2>${isEdit ? 'Edit metal' : (current === 'RECEIPT' ? 'Get metal' : 'Give metal')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
     <form id="data-form" data-kind="metal">
-      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Direction<select name="direction">
         <option value="OPENING" ${e.direction === 'OPENING' ? 'selected' : ''}>Opening</option>
         <option value="ISSUE" ${current === 'ISSUE' ? 'selected' : ''}>Give metal</option>
@@ -950,7 +953,7 @@ function settleModal() {
   return `<div class="modal-backdrop"><section class="modal">
     <div class="section-head"><h2>${e.id ? 'Edit settlement' : 'Close account'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
     <form id="data-form" data-kind="settle">
-      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       <label>Cash closed (₹)<input name="moneyAmountInr" type="number" min="0" step="0.01" value="${esc(e.moneyAmountInr || 0)}"></label>
       <label>Metal type<select name="metalType"><option value="">None</option>${metalTypeOptions(e.metalType || '')}</select></label>
       <label>Purity<select name="purity">${purityOptions(e.metalType || 'GOLD', e.purity || '22K')}</select></label>
@@ -1211,7 +1214,7 @@ async function onDelete(kind) {
   const row = state.editing;
   if (!row) return;
   if (kind === 'supplier') {
-    if (!confirm(`Delete ${row.name} and all of their khata?`)) return;
+    if (!confirm(`Delete ${partyLabel(row)} and all of their khata?`)) return;
     markDeleted('suppliers', row.id);
     for (const item of state.money.filter((x) => x.supplierId === row.id)) markDeleted('money', item.id);
     for (const item of state.metal.filter((x) => x.supplierId === row.id)) markDeleted('metal', item.id);
@@ -1451,7 +1454,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.getRegistrations()
     .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
     .then(() => caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))))
-    .then(() => navigator.serviceWorker.register('./service-worker.js?v=16'))
+    .then(() => navigator.serviceWorker.register('./service-worker.js?v=17'))
     .catch(() => {});
 }
 

@@ -125,38 +125,69 @@ export function digitsOnly(value) {
 }
 
 export function isPhoneLike(value) {
-  const d = digitsOnly(value);
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  const d = digitsOnly(raw);
   if (d.length < 8 || d.length > 15) return false;
-  const compact = String(value || '').replace(/[\s\-+()]/g, '');
-  return d.length >= Math.min(8, compact.length);
+  const compact = raw.replace(/[\s\-+().]/g, '');
+  return compact === d;
+}
+
+export function partyDisplayName(party) {
+  const name = String(party?.name || '').trim();
+  if (!name || isPhoneLike(name)) return '';
+  return name;
+}
+
+function humanName(value) {
+  const name = String(value || '').trim();
+  if (!name || isPhoneLike(name)) return '';
+  return name;
+}
+
+function partyPhoneKey(party) {
+  const fromPhone = digitsOnly(party?.phone);
+  if (fromPhone.length >= 8 && fromPhone.length <= 15) return fromPhone;
+  if (isPhoneLike(party?.name)) return digitsOnly(party.name);
+  return '';
 }
 
 function sameParty(a, b) {
-  const ap = digitsOnly(a.phone);
-  const bp = digitsOnly(b.phone);
-  const an = digitsOnly(a.name);
-  const bn = digitsOnly(b.name);
-  if (ap && (ap === bp || ap === bn)) return true;
-  if (bp && bp === an) return true;
-  const na = String(a.name || '').trim().toLowerCase();
-  const nb = String(b.name || '').trim().toLowerCase();
-  if (na && na === nb && (!ap || !bp || ap === bp)) return true;
+  const ap = partyPhoneKey(a);
+  const bp = partyPhoneKey(b);
+  if (ap && bp && ap === bp) return true;
+  const na = humanName(a.name).toLowerCase();
+  const nb = humanName(b.name).toLowerCase();
+  if (na && nb && na === nb) return true;
   return false;
+}
+
+function preferPhone(a, b) {
+  if (digitsOnly(a)) return String(a).trim();
+  if (digitsOnly(b)) return String(b).trim();
+  if (isPhoneLike(a)) return String(a).trim();
+  if (isPhoneLike(b)) return String(b).trim();
+  return '';
 }
 
 function preferParty(a, b) {
   const out = { ...a };
-  if (isPhoneLike(out.name) && !isPhoneLike(b.name) && String(b.name || '').trim()) {
-    out.phone = out.phone || out.name;
-    out.name = b.name;
-  } else if (!String(out.name || '').trim() && b.name) {
-    out.name = b.name;
-  }
-  if (!digitsOnly(out.phone)) out.phone = b.phone || (isPhoneLike(b.name) ? b.name : out.phone) || '';
+  out.name = humanName(a.name) || humanName(b.name) || '';
+  out.phone = preferPhone(a.phone, b.phone) || preferPhone(a.name, b.name) || out.phone || '';
   if (!out.city) out.city = b.city || '';
   if (!out.notes) out.notes = b.notes || '';
   if (!out.id) out.id = b.id;
   return out;
+}
+
+function nameFromJournals(id, ledger) {
+  const sid = String(id || '');
+  for (const row of [...(ledger?.money || []), ...(ledger?.metal || []), ...(ledger?.settlements || [])]) {
+    if (String(row.supplierId || '') !== sid) continue;
+    const n = humanName(row.supplierName);
+    if (n) return n;
+  }
+  return '';
 }
 
 export function dedupePartyLedger(ledger) {
@@ -181,12 +212,25 @@ export function dedupePartyLedger(ledger) {
     ...row,
     supplierId: idMap[String(row.supplierId || '')] || row.supplierId
   }));
+  const money = remap(ledger?.money);
+  const metal = remap(ledger?.metal);
+  const settlements = remap(ledger?.settlements);
+  const journals = { money, metal, settlements };
+  const suppliers = kept.map((row) => {
+    const out = { ...row };
+    if (isPhoneLike(out.name) && !digitsOnly(out.phone)) out.phone = String(out.name).trim();
+    if (!humanName(out.name)) {
+      const recovered = nameFromJournals(out.id, journals);
+      out.name = recovered || '';
+    }
+    return out;
+  });
   return {
     ...ledger,
-    suppliers: kept,
-    money: remap(ledger?.money),
-    metal: remap(ledger?.metal),
-    settlements: remap(ledger?.settlements)
+    suppliers,
+    money: withSupplierNames(money, suppliers),
+    metal: withSupplierNames(metal, suppliers),
+    settlements: withSupplierNames(settlements, suppliers)
   };
 }
 
@@ -252,10 +296,10 @@ export function removeById(list, id) {
 }
 
 export function withSupplierNames(rows, suppliers) {
-  const names = Object.fromEntries((suppliers || []).map((s) => [s.id, s.name]));
+  const names = Object.fromEntries((suppliers || []).map((s) => [s.id, partyDisplayName(s)]));
   return rows.map((row) => ({
     ...row,
-    supplierName: names[row.supplierId] || row.supplierName || ''
+    supplierName: names[row.supplierId] || humanName(row.supplierName) || ''
   }));
 }
 

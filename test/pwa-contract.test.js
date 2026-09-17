@@ -82,6 +82,7 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(js, /Refresh data/);
   assert.match(js, /toSessionUnlock/);
   assert.match(js, /dedupePartyLedger/);
+  assert.match(js, /partyDisplayName/);
   assert.match(js, /splitDeal/);
   assert.match(js, /data-view="help"/);
   assert.match(js, /How this works/);

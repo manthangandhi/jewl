@@ -91,6 +91,47 @@ test('demo ledger is a jewellery khata spanning about three months', async () =>
   assert.ok(ledger.metalMaster.some((row) => row.rateInrPerGram > 0));
 });
 
+test('a party is identified by name, never by a mobile number', async () => {
+  const { partyDisplayName, isPhoneLike } = await import('../pwa/sheet-model.js');
+  assert.equal(isPhoneLike('9820011122'), true);
+  assert.equal(isPhoneLike('98200 11122'), true);
+  assert.equal(isPhoneLike('Ramesh Karigar'), false);
+  assert.equal(isPhoneLike('Ramesh 9820011122'), false);
+  assert.equal(partyDisplayName({ name: 'Ramesh Karigar', phone: '98200 11122' }), 'Ramesh Karigar');
+  assert.equal(partyDisplayName({ name: '9820011122', phone: '9820011122' }), '');
+});
+
+test('phone-named row merged with a named row keeps the person name', async () => {
+  const { dedupePartyLedger } = await import('../pwa/sheet-model.js');
+  const next = dedupePartyLedger({
+    suppliers: [
+      { id: 's-phone', name: '9820011122', phone: '9820011122' },
+      { id: 's-name', name: 'Ramesh Karigar', phone: '98200 11122' }
+    ],
+    money: [
+      { id: 'm1', supplierId: 's-phone', supplierName: '9820011122', type: 'PURCHASE', amountInr: 100 }
+    ],
+    metal: [],
+    settlements: []
+  });
+  assert.equal(next.suppliers.length, 1);
+  assert.equal(next.suppliers[0].name, 'Ramesh Karigar');
+  assert.match(String(next.suppliers[0].phone).replace(/\D/g, ''), /9820011122/);
+  assert.equal(next.money[0].supplierName, 'Ramesh Karigar');
+});
+
+test('a lone party stored as a mobile number takes the name from the journal', async () => {
+  const { dedupePartyLedger } = await import('../pwa/sheet-model.js');
+  const next = dedupePartyLedger({
+    suppliers: [{ id: 's1', name: '9876543210', phone: '' }],
+    money: [{ id: 'm1', supplierId: 's1', supplierName: 'Suresh Jewels', type: 'PURCHASE', amountInr: 10 }],
+    metal: [],
+    settlements: []
+  });
+  assert.equal(next.suppliers[0].name, 'Suresh Jewels');
+  assert.equal(String(next.suppliers[0].phone).replace(/\D/g, ''), '9876543210');
+});
+
 test('duplicate parties that are the same person by phone are merged into one', async () => {
   const { dedupePartyLedger } = await import('../pwa/sheet-model.js');
   const { summarizeLedger } = await import('../pwa/ledger-math.js');
