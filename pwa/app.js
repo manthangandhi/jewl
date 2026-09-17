@@ -553,7 +553,7 @@ function loginScreen() {
 
 function recordActions() {
   if (!state.suppliers.length) return '';
-  return `<div class="action-grid">
+  return `<div class="action-grid pass-actions" role="group" aria-label="Khata actions">
     <button type="button" data-action="modal" data-modal="purchase"><span class="ag-ico">₹</span><span>Purchase</span></button>
     <button type="button" data-action="modal" data-modal="payment"><span class="ag-ico">↓</span><span>Payment</span></button>
     <button type="button" data-action="modal" data-modal="issue"><span class="ag-ico">→</span><span>Give metal</span></button>
@@ -568,16 +568,20 @@ function partiesHome() {
     suppliers: state.suppliers, money: state.money, metal: state.metal, settlements: state.settlements,
     ...rangeForPreset('month')
   });
-  const list = state.syncing && !rows.length ? `<div class="empty-khata grow"><p>Loading…</p></div>` : rows.length ? `<section class="list-card grow">
-      <div class="list-head"><span>Parties</span><span>${rows.length}</span></div>
+  const list = state.syncing && !rows.length ? `<div class="empty-khata grow"><p>Loading…</p></div>` : rows.length ? `<section class="list-card blotter grow">
+      <div class="list-head"><span>Khata</span><span>${rows.length}</span></div>
       <div class="party-list">${rows.map((row) => {
     const dir = moneyDirection(row.payable);
     const metal = metalPills(row.metalByPurity);
     const party = state.suppliers.find((s) => s.id === row.id) || {};
-    return `<button type="button" class="cell party-row ${dir.tone}" data-supplier="${esc(row.id)}">
+    return `<button type="button" class="cell party-row party-card ${dir.tone}" data-supplier="${esc(row.id)}">
         <span class="avatar">${esc(initials(partyLabel(party) !== 'Party' ? partyLabel(party) : partyLabel(row)))}</span>
-        <span class="cell-main"><strong class="party-name">${esc(partyLabel({ ...row, ...party }))}</strong>${String(row.id || party.id || '').startsWith('demo-') ? '<small class="demo-tag">DEMO</small>' : ''}${party.phone ? `<small class="party-phone">${esc(party.phone)}</small>` : ''}${metal || ''}</span>
-        <span class="cell-trail ${dir.tone}">${dir.amount ? `<em>${dir.label}</em><b>${money(dir.amount)}</b>` : '<b class="zero">—</b>'}</span>
+        <span class="cell-main party-body">
+          <span class="party-title-row"><strong class="party-name">${esc(partyLabel({ ...row, ...party }))}</strong>${String(row.id || party.id || '').startsWith('demo-') ? '<small class="demo-tag">DEMO</small>' : ''}</span>
+          ${party.phone ? `<small class="party-phone">${esc(party.phone)}</small>` : ''}
+          ${metal || ''}
+        </span>
+        <span class="cell-trail party-bal ${dir.tone}">${dir.amount ? `<em class="bal-label">${dir.label}</em><b class="bal-fig">${money(dir.amount)}</b>` : '<em class="bal-label">Square</em><b class="zero">—</b>'}</span>
         ${ic('chevron')}
       </button>`;
   }).join('')}</div>
@@ -633,20 +637,20 @@ function supplierPassbook() {
       <div class="party-id">
         <span class="avatar lg">${esc(initials(partyLabel(detail.supplier)))}</span>
         <div>
-          <h1>${esc(partyLabel(detail.supplier))}</h1>
-          ${detail.supplier.phone ? `<p>${esc(detail.supplier.phone)}</p>` : ''}
+          <h1 class="party-name">${esc(partyLabel(detail.supplier))}</h1>
+          ${detail.supplier.phone ? `<p class="party-phone">${esc(detail.supplier.phone)}</p>` : ''}
         </div>
       </div>
       <button class="btn-plain" data-edit="supplier" data-id="${esc(detail.supplier.id)}" type="button">Edit</button>
     </header>
     <section class="balance-hero tight">
       <div class="bh ${dir.tone}"><span>${dir.label || 'Square'}</span><strong>${money(dir.amount)}</strong></div>
-      <div class="bh"><span>Metal</span><div>${metalPills(detail.metalByPurity) || '<strong>—</strong>'}</div></div>
+      <div class="bh"><span>Metal with party</span><div>${metalPills(detail.metalByPurity) || '<strong>—</strong>'}</div></div>
     </section>
     ${recordActions()}
     <button class="text-link" data-action="modal" data-modal="settle" type="button">Settle account</button>
-    <section class="list-card grow">
-      <div class="list-head"><span>Passbook</span></div>
+    <section class="list-card blotter grow">
+      <div class="list-head"><span>Running hisab</span></div>
       ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
         <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
           <span class="cell-main">
@@ -655,7 +659,7 @@ function supplierPassbook() {
           </span>
           <span class="cell-trail">
             <b class="${line.amountInr < 0 ? 'collect' : line.amountInr > 0 ? 'owe' : ''}">${line.kind === 'metal' ? grams(line.grams) : money(Math.abs(line.amountInr))}${line.kind === 'settle' && line.grams ? ` · ${grams(line.grams)}` : ''}</b>
-            <em>${money(line.runningInr)}</em>
+            <em class="hisab">Hisab ${money(line.runningInr)}</em>
           </span>
         </li>`).join('')}</ol>` : '<div class="empty-in">No entries</div>'}
     </section>
@@ -687,7 +691,6 @@ function reportView() {
         <button type="button" class="btn btn-primary" data-action="print-report">Print</button>
       </div>
     </div>
-    ${recordActions()}
     <section class="metric-grid">
       <div class="metric"><span>Purchases</span><strong>${money(report.purchases)}</strong></div>
       <div class="metric"><span>Payments</span><strong>${money(report.payments)}</strong></div>
@@ -721,24 +724,51 @@ function helpView() {
   return `<section class="help-page list-card grow">
     <div class="list-head"><span>How this works</span><button type="button" class="btn-plain" data-action="tour-start">Start tour</button></div>
     <div class="help-body">
-      <h2>Parties</h2>
-      <p>One card is one person or firm. Put their name and phone on that card. Gold, silver, and any other metal all belong to that same party — never make a second party for a metal or for the mobile number.</p>
-      <h2>Hume dena / Unse lena</h2>
-      <p><strong>Hume dena</strong> is rupees we owe them (purchases minus payments). <strong>Unse lena</strong> is rupees they owe us (for example an advance). Metal with them is separate, shown as GOLD 22K / SILVER 999 pills.</p>
-      <h2>Purchase</h2>
-      <p>Use Purchase for a bill. Fill amount ₹, or metal, or both. Add extra metal lines if the same bill has gold and silver. Leave amount blank when it is metal-only.</p>
-      <h2>Payment</h2>
-      <p>Use Payment when you pay them. You can also record metal that moved with that payment.</p>
-      <h2>Give metal / Get metal</h2>
-      <p>Use these when only metal moves: you issue gold for jobwork, or you receive it back. Same party, any metal, as many times as needed.</p>
-      <h2>Settle</h2>
-      <p>Close cash and/or metal against the running khata when you square the account.</p>
-      <h2>Refresh data</h2>
-      <p>Tap <strong>Refresh data</strong> in the header to pull the Sheet. That does not lock you out. The browser refresh button will ask for PIN again on this tab.</p>
-      <h2>Masters</h2>
-      <p>Add any metal and purity you use (gold 20K, platinum, etc.). Purchase and Give/Get metal then offer those in the dropdowns.</p>
-      <h2>Demo khata</h2>
-      <p>Sheet → Load demo khata writes sample parties into your Google Sheet (not into the app). Remove demo khata deletes those sample rows. A live shop should stay empty until you add real parties.</p>
+      <article class="help-item">
+        <h2>Parties</h2>
+        <p class="help-lead">One name, one khata.</p>
+        <p>Phone is optional and quiet. Gold, silver, and cash sit on the same card — never a second party for a metal or a mobile number.</p>
+      </article>
+      <article class="help-item">
+        <h2>Hume dena / Unse lena</h2>
+        <p class="help-lead">Hume dena = we owe them. Unse lena = they owe us.</p>
+        <p>Rupees only. Metal with the party is separate, stamped GOLD 22K / SILVER 999.</p>
+      </article>
+      <article class="help-item">
+        <h2>Purchase</h2>
+        <p class="help-lead">Bill from party — rupees, metal, or both.</p>
+        <p>Leave rupees blank for metal-only. Add extra metal lines for gold and silver on the same bill. Gave metal = you issued. Got metal = it came back.</p>
+      </article>
+      <article class="help-item">
+        <h2>Payment</h2>
+        <p class="help-lead">You paid them.</p>
+        <p>Rupees, and optional metal that moved with that payment.</p>
+      </article>
+      <article class="help-item">
+        <h2>Give metal / Get metal</h2>
+        <p class="help-lead">Metal only — no rupee amount.</p>
+        <p>Issue for jobwork, or receive it back. Same party, any metal, as many times as needed.</p>
+      </article>
+      <article class="help-item">
+        <h2>Settle</h2>
+        <p class="help-lead">Square the running hisab.</p>
+        <p>Close cash and/or metal against the khata.</p>
+      </article>
+      <article class="help-item">
+        <h2>Refresh data</h2>
+        <p class="help-lead">Header Refresh pulls the Sheet. You stay unlocked.</p>
+        <p>The browser refresh button will ask for PIN again on this tab.</p>
+      </article>
+      <article class="help-item">
+        <h2>Masters</h2>
+        <p class="help-lead">Metals and purities you actually use.</p>
+        <p>Purchase and Give / Get metal then offer those in the dropdowns.</p>
+      </article>
+      <article class="help-item">
+        <h2>Demo khata</h2>
+        <p class="help-lead">Sheet screen only — not for live books.</p>
+        <p>Load demo writes sample parties into the Google Sheet, not into the app. A live shop stays empty until you add real parties.</p>
+      </article>
     </div>
   </section>`;
 }
@@ -761,30 +791,40 @@ function tourOverlay() {
 }
 
 function booksView() {
-  return `<section class="settings-list">
-    <button class="cell" data-action="refresh" type="button">
-      <span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : ''}</span>
-      ${ic('chevron')}
-    </button>
-    <button class="cell" data-view="masters" type="button">
-      <span class="cell-main"><strong>Metal master</strong><small>Purity and optional rate</small></span>
-      ${ic('chevron')}
-    </button>
-    <button class="cell" data-action="seed-demo" type="button">
-      <span class="cell-main"><strong>Load demo khata (optional)</strong><small>Writes sample parties into this Google Sheet — not stored in the app</small></span>
-      ${ic('chevron')}
-    </button>
-    <button class="cell" data-action="strip-demo" type="button">
-      <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes demo- parties and their sample journals</small></span>
-      ${ic('chevron')}
-    </button>
-    ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
-      <span class="cell-main"><strong>Open in Google Sheets</strong></span>
-      ${ic('chevron')}
-    </a>` : ''}
-    <button class="cell danger" data-action="logout" type="button">
-      <span class="cell-main"><strong>Lock</strong></span>
-    </button>
+  return `<section class="sheet-page">
+    <section class="settings-list">
+      <button class="cell" data-view="masters" type="button">
+        <span class="cell-main"><strong>Metal master</strong><small>Purity and optional rate</small></span>
+        ${ic('chevron')}
+      </button>
+    </section>
+    <p class="sheet-kicker">Sheet</p>
+    <section class="settings-list sheet-secondary">
+      <button class="cell" data-action="refresh" type="button">
+        <span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : '<small>Reload the Google Sheet. Header Refresh does the same.</small>'}</span>
+        ${ic('chevron')}
+      </button>
+      ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
+        <span class="cell-main"><strong>Open in Google Sheets</strong><small>View the live workbook</small></span>
+        ${ic('chevron')}
+      </a>` : ''}
+    </section>
+    <p class="sheet-kicker demo">Demo only — not live books</p>
+    <section class="settings-list sheet-demo">
+      <button class="cell" data-action="seed-demo" type="button">
+        <span class="cell-main"><strong>Load demo khata</strong><small>Writes sample parties into this Google Sheet — not stored in the app</small></span>
+        ${ic('chevron')}
+      </button>
+      <button class="cell" data-action="strip-demo" type="button">
+        <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes demo- parties and their sample journals</small></span>
+        ${ic('chevron')}
+      </button>
+    </section>
+    <section class="settings-list">
+      <button class="cell danger" data-action="logout" type="button">
+        <span class="cell-main"><strong>Lock</strong></span>
+      </button>
+    </section>
   </section>`;
 }
 
@@ -877,7 +917,7 @@ function metalLineHtml(i, draft = {}) {
   const dir = draft[`metalDir_${i}`] || 'ISSUE';
   const pur = draft[`purity_${i}`] || '22K';
   return `<div class="metal-line" data-metal-row="${i}">
-      <label>I
+      <label>Gave / got
         <select name="metalDir_${i}">
           <option value="ISSUE" ${dir === 'ISSUE' ? 'selected' : ''}>Gave metal</option>
           <option value="RECEIPT" ${dir === 'RECEIPT' ? 'selected' : ''}>Got metal</option>
@@ -896,11 +936,11 @@ function dealModal(type) {
   const draft = state.dealDraft || {};
   return `<div class="modal-backdrop"><section class="modal">
     <div class="section-head"><h2>${isPay ? 'Payment' : 'Purchase'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
-    <p class="lede">Fill rupees, metal, or both. One party can have gold, silver, and any other metal on the same khata.</p>
+    <p class="lede">${isPay ? 'Payment to party. Rupees, metal, or both.' : 'Bill from party. Rupees, metal, or both.'}</p>
     <form id="data-form" data-kind="deal">
       ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${(draft.supplierId || state.supplierId) === s.id ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       <input type="hidden" name="type" value="${esc(isPay ? 'PAYMENT' : 'PURCHASE')}">
-      <label>Amount ₹ (optional)<input name="amountInr" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Leave blank if metal only" value="${esc(draft.amountInr || '')}"></label>
+      <label>Rupees (optional)<input name="amountInr" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Blank if metal only" value="${esc(draft.amountInr || '')}"></label>
       <div class="metal-block">
         <div class="list-head"><span>Metal (optional)</span><button type="button" class="btn-plain" data-action="add-metal-row">+ Metal</button></div>
         ${Array.from({ length: count }, (_, i) => metalLineHtml(i, draft)).join('')}
