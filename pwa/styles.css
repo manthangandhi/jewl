@@ -60,6 +60,15 @@ button { cursor: pointer; border: 0; background: none; color: inherit; }
   width: 40px; height: 40px; border-radius: 0;
   display: grid; place-items: center; color: var(--ink);
 }
+.btn-refresh {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 6px 10px;
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+}
+.btn-refresh .ic { width: 16px; height: 16px; }
+.btn-refresh:disabled { opacity: .5; cursor: wait; }
+.btn-refresh:hover { background: #f3eee4; }
 .icon-btn.back .ic { transform: rotate(180deg); }
 .sync-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--gold);
@@ -356,6 +365,10 @@ input, select { border: 1px solid var(--line); border-radius: 0; padding: 12px; 
 .mini-stats strong { font-size: 16px; font-weight: 800; }
 .passbook-list.tight .cell { min-height: 44px; padding: 6px 12px; }
 
+@media (max-width: 420px) {
+  .btn-refresh span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .btn-refresh { padding: 6px; min-width: 36px; justify-content: center; }
+}
 @media (min-width: 768px) {
   .stage { padding: 14px 16px; }
   .bh strong { font-size: 26px; }

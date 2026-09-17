@@ -4,12 +4,13 @@ import {
   buildDemoLedger, mergeDemoLedger
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
-import { toLedgerSnapshot, fromLedgerSnapshot } from './session-cache.js';
+import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
 import { admitUnlock, applyPinKey, shouldHandlePinKeyboard } from './shop-auth.js';
 
 const URL_KEY = 'karigar.appsScriptUrl';
 const CACHE_KEY = 'karigar.ledgerCache';
 const PIN_FP_KEY = 'karigar.pinFp';
+const SESSION_UNLOCK_KEY = 'karigar.sessionUnlock';
 const root = document.querySelector('#app');
 const emptyTrack = () => ({ suppliers: [], money: [], metal: [], settlements: [], metalMaster: [] });
 const state = {
@@ -67,6 +68,7 @@ function ic(name) {
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/>',
     chevron: '<path d="M9 6l6 6-6 6"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>',
     masters: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>'
   };
   return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || ''}</svg>`;
@@ -207,6 +209,26 @@ async function copyOwnerScript() {
 
 function forgetLocalPin() {
   try { localStorage.removeItem(PIN_FP_KEY); } catch { /* ignore */ }
+}
+
+function writeSessionUnlock() {
+  const rec = toSessionUnlock({ sheetsUrl: state.sheetsUrl, pin: state.pin });
+  try {
+    if (rec) sessionStorage.setItem(SESSION_UNLOCK_KEY, JSON.stringify(rec));
+    else sessionStorage.removeItem(SESSION_UNLOCK_KEY);
+  } catch { /* ignore */ }
+}
+
+function readSessionUnlock() {
+  try {
+    return fromSessionUnlock(JSON.parse(sessionStorage.getItem(SESSION_UNLOCK_KEY) || 'null'));
+  } catch {
+    return null;
+  }
+}
+
+function forgetSessionUnlock() {
+  try { sessionStorage.removeItem(SESSION_UNLOCK_KEY); } catch { /* ignore */ }
 }
 
 async function refreshFromSheet() {
@@ -646,7 +668,7 @@ function reportView() {
 function booksView() {
   return `<section class="settings-list">
     <button class="cell" data-action="refresh" type="button">
-      <span class="cell-main"><strong>Refresh from Sheet</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : ''}</span>
+      <span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : ''}</span>
       ${ic('chevron')}
     </button>
     <button class="cell" data-view="masters" type="button">
@@ -706,6 +728,9 @@ function render() {
         ${title ? `<h1 class="appbar-title">${esc(title)}</h1>` : ''}
         <div class="appbar-end">
           ${state.saving || state.syncing ? '<span class="sync-dot"></span>' : ''}
+          <button class="btn-refresh" data-action="refresh" type="button" ${state.syncing ? 'disabled' : ''} aria-label="Refresh data">
+            ${ic('refresh')}<span>Refresh data</span>
+          </button>
           <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock">${ic('lock')}</button>
         </div>
       </header>
@@ -881,6 +906,7 @@ function logout() {
   state.pin = '';
   state.lockDigits = '';
   forgetLocalPin();
+  forgetSessionUnlock();
   state.view = 'parties';
   state.error = null;
   landing();
@@ -1104,16 +1130,11 @@ async function submitForm(event) {
       const verified = await verifyPin((payload) => sheetsRequest(payload));
       if (!admitUnlock({ typedPin: typed, remote: verified }).enter) {
         state.pin = '';
+        forgetSessionUnlock();
         throw new Error('Wrong shop PIN');
       }
-      const cache = readCache();
-      if (cache) applyLoaded(cache);
-      else {
-        state.unlocked = true;
-        refreshSummary();
-      }
-      render();
-      refreshFromSheet();
+      writeSessionUnlock();
+      await enterUnlocked();
       return;
     }
     const kind = form.dataset.kind;
@@ -1188,6 +1209,17 @@ async function submitForm(event) {
   }
 }
 
+async function enterUnlocked() {
+  const cache = readCache();
+  if (cache) applyLoaded(cache);
+  else {
+    state.unlocked = true;
+    refreshSummary();
+  }
+  render();
+  await refreshFromSheet();
+}
+
 async function bootstrap() {
   try {
     const stored = localStorage.getItem(URL_KEY);
@@ -1199,6 +1231,23 @@ async function bootstrap() {
   state.unlocked = false;
   state.pin = '';
   state.lockDigits = '';
+  const session = readSessionUnlock();
+  if (session && (!state.sheetsUrl || session.sheetsUrl === state.sheetsUrl)) {
+    state.sheetsUrl = session.sheetsUrl;
+    state.pin = session.pin;
+    state.gate = 'login';
+    landing();
+    try {
+      const verified = await verifyPin((payload) => sheetsRequest(payload));
+      if (admitUnlock({ typedPin: session.pin, remote: verified }).enter) {
+        writeSessionUnlock();
+        await enterUnlocked();
+        return;
+      }
+    } catch { /* fall through to PIN */ }
+    forgetSessionUnlock();
+    state.pin = '';
+  }
   landing();
 }
 
@@ -1206,7 +1255,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.getRegistrations()
     .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
     .then(() => caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))))
-    .then(() => navigator.serviceWorker.register('./service-worker.js?v=13'))
+    .then(() => navigator.serviceWorker.register('./service-worker.js?v=14'))
     .catch(() => {});
 }
 

@@ -29,3 +29,15 @@ export function localPinMatches(storedFingerprint, execUrl, pin) {
   if (!storedFingerprint) return false;
   return storedFingerprint === pinFingerprint(execUrl, pin);
 }
+
+export function toSessionUnlock({ sheetsUrl, pin } = {}) {
+  const url = String(sheetsUrl || '').trim();
+  const p = String(pin || '').trim();
+  if (!url || !p) return null;
+  return { v: 1, sheetsUrl: url, pin: p };
+}
+
+export function fromSessionUnlock(raw) {
+  if (!raw || raw.v !== 1) return null;
+  return toSessionUnlock({ sheetsUrl: raw.sheetsUrl, pin: raw.pin });
+}

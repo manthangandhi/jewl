@@ -29,6 +29,16 @@ test('fromLedgerSnapshot rejects junk', () => {
   assert.equal(fromLedgerSnapshot({ suppliers: [] }), null);
 });
 
+test('tab session unlock stores PIN with the web app URL and drops empties', async () => {
+  const { toSessionUnlock, fromSessionUnlock } = await import('../pwa/session-cache.js');
+  assert.equal(toSessionUnlock({ sheetsUrl: '', pin: '1234' }), null);
+  assert.equal(toSessionUnlock({ sheetsUrl: 'https://script.google.com/macros/s/x/exec', pin: '' }), null);
+  const rec = toSessionUnlock({ sheetsUrl: 'https://script.google.com/macros/s/x/exec', pin: ' 4455 ' });
+  assert.equal(rec.pin, '4455');
+  assert.equal(fromSessionUnlock(rec).sheetsUrl, 'https://script.google.com/macros/s/x/exec');
+  assert.equal(fromSessionUnlock({ v: 1, sheetsUrl: 'https://x', pin: '' }), null);
+});
+
 test('local PIN match is per web app URL', () => {
   const fp = pinFingerprint('https://script.google.com/macros/s/abc/exec', '1234');
   assert.equal(localPinMatches(fp, 'https://script.google.com/macros/s/abc/exec', '1234'), true);
