@@ -1,4 +1,4 @@
-const CACHE_NAME = 'karigar-shell-v15';
+const CACHE_NAME = 'karigar-shell-v16';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const CORE_ASSETS = [
   './sheets-client.js',
   './shop-auth.js',
   './session-cache.js',
+  './tour.js',
   './ledger-math.js',
   './manifest.webmanifest',
   './icon.svg',

@@ -6,6 +6,7 @@ import {
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
 import { admitUnlock, applyPinKey, shouldHandlePinKeyboard } from './shop-auth.js';
+import { resolveTourClick, applyTourNav } from './tour.js';
 
 const URL_KEY = 'karigar.appsScriptUrl';
 const CACHE_KEY = 'karigar.ledgerCache';
@@ -275,9 +276,6 @@ async function refreshFromSheet() {
       state.needsDedupeSave = false;
       await persist();
     }
-    if (!state.suppliers.length && !state.money.length) {
-      await seedDemoIntoSheet({ silent: true });
-    }
   } catch (error) {
     const msg = String(error.message || '');
     if (/wrong shop pin|does not unlock/i.test(msg)) {
@@ -295,8 +293,11 @@ async function refreshFromSheet() {
 }
 
 async function seedDemoIntoSheet({ silent } = {}) {
-  if (!silent && state.suppliers.length) {
-    if (!confirm('Add the 3-month sample khata to this Google Sheet? Existing parties stay. Sample rows use demo- ids.')) return;
+  if (!silent) {
+    const warn = state.suppliers.length
+      ? 'This writes a 3-month DEMO khata into this Google Sheet. Existing parties stay. Sample rows use demo- ids. Do not use this on a live shop.'
+      : 'This writes a 3-month DEMO khata into this Google Sheet. Use only to show the product — not for a live shop.';
+    if (!confirm(warn)) return;
   }
   const next = mergeDemoLedger(state, buildDemoLedger(new Date()));
   state.suppliers = next.suppliers;
@@ -560,8 +561,8 @@ function partiesHome() {
   }).join('')}</div>
     </section>` : `<div class="empty-khata grow">
       <p>No parties yet</p>
-      <button class="btn btn-primary" data-action="seed-demo" type="button">Seed 3-month sample into Sheet</button>
-      <button class="btn btn-soft" data-action="modal" data-modal="supplier">Add party</button>
+      <p class="lede">Add a karigar or supplier. Gold, silver, and cash all sit on that one card.</p>
+      <button class="btn btn-primary" data-action="modal" data-modal="supplier">Add party</button>
     </div>`;
   return `
     <div class="desk-split fill">
@@ -714,6 +715,8 @@ function helpView() {
       <p>Tap <strong>Refresh data</strong> in the header to pull the Sheet. That does not lock you out. The browser refresh button will ask for PIN again on this tab.</p>
       <h2>Masters</h2>
       <p>Add any metal and purity you use (gold 20K, platinum, etc.). Purchase and Give/Get metal then offer those in the dropdowns.</p>
+      <h2>Demo khata</h2>
+      <p>Sheet → Load demo khata is only for showing the product. A live shop should stay empty until you add real parties.</p>
     </div>
   </section>`;
 }
@@ -722,8 +725,8 @@ function tourOverlay() {
   if (state.tourStep == null || state.tourStep < 0) return '';
   const step = TOUR[state.tourStep] || TOUR[0];
   const last = state.tourStep >= TOUR.length - 1;
-  return `<div class="tour-backdrop" data-action="tour-skip">
-    <section class="tour-card" onclick="event.stopPropagation()">
+  return `<div class="tour-backdrop">
+    <section class="tour-card">
       <p class="eyebrow">How this works · ${state.tourStep + 1} / ${TOUR.length}</p>
       <h2>${esc(step.title)}</h2>
       <p>${esc(step.body)}</p>
@@ -746,7 +749,7 @@ function booksView() {
       ${ic('chevron')}
     </button>
     <button class="cell" data-action="seed-demo" type="button">
-      <span class="cell-main"><strong>Seed 3-month sample khata</strong><small>Writes demo parties and journals into this Google Sheet</small></span>
+      <span class="cell-main"><strong>Load demo khata (optional)</strong><small>For product demos only — writes sample parties into this Sheet</small></span>
       ${ic('chevron')}
     </button>
     ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
@@ -1035,6 +1038,19 @@ function logout() {
 function bind() {
   root.onclick = async (event) => {
     const target = event.target.closest('[data-view],[data-action],[data-supplier],[data-edit],[data-delete]');
+    const tourNav = resolveTourClick({
+      action: target && target.dataset.action,
+      clickedBackdrop: Boolean(event.target.classList && event.target.classList.contains('tour-backdrop'))
+    });
+    if (tourNav) {
+      const next = applyTourNav(state.tourStep, TOUR.length, tourNav);
+      state.tourStep = next.step;
+      if (next.finished) {
+        try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* ignore */ }
+      }
+      render();
+      return;
+    }
     if (!target) return;
     try {
       if (target.dataset.supplier) {
@@ -1090,19 +1106,7 @@ function bind() {
         render();
         return;
       } else if (action === 'tour-start') {
-        state.tourStep = 0;
-        render();
-        return;
-      } else if (action === 'tour-next') {
-        if (state.tourStep >= TOUR.length - 1) {
-          state.tourStep = null;
-          try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* ignore */ }
-        } else state.tourStep += 1;
-        render();
-        return;
-      } else if (action === 'tour-skip') {
-        state.tourStep = null;
-        try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* ignore */ }
+        state.tourStep = applyTourNav(state.tourStep, TOUR.length, 'start').step;
         render();
         return;
       }
@@ -1404,7 +1408,9 @@ async function enterUnlocked() {
     refreshSummary();
   }
   try {
-    if (!localStorage.getItem(TOUR_KEY) && state.tourStep == null) state.tourStep = 0;
+    if (!localStorage.getItem(TOUR_KEY) && state.tourStep == null) {
+      state.tourStep = applyTourNav(null, TOUR.length, 'start').step;
+    }
   } catch { /* ignore */ }
   render();
   await refreshFromSheet();
@@ -1445,7 +1451,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.getRegistrations()
     .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
     .then(() => caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))))
-    .then(() => navigator.serviceWorker.register('./service-worker.js?v=15'))
+    .then(() => navigator.serviceWorker.register('./service-worker.js?v=16'))
     .catch(() => {});
 }
 

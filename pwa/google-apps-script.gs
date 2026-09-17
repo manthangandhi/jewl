@@ -62,6 +62,7 @@ function onOpen() {
     .createMenu("Karigar")
     .addItem("Authorise this Sheet", "authorizeKarigar")
     .addItem("Create tabs", "initLedger")
+    .addItem("Load sample khata (demo only)", "seedDemo")
     .addToUi();
 }
 
@@ -150,7 +151,6 @@ function initLedger() {
   seedMetaIfEmpty_();
   hideUnusedDefaultSheet_();
   hideLegacyBalances_();
-  seedDemoLedger_({ force: false });
   return {
     ok: true,
     version: SCRIPT_VERSION,

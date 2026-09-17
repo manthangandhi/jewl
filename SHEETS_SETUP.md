@@ -25,7 +25,7 @@ Opening `/exec` in Chrome on FluffyPens would 401 too. That is normal.
    `const SHEET_ID = "THIS_ID";`
    `const SCRIPT_PIN = "your-secret-pin";`
    Save. The PWA will not load the books without this PIN.
-4. In the editor: function **`initLedger`** → **Run**.
+4. In the editor: function **`initLedger`** → **Run**. This creates empty tabs. It does **not** load demo parties. Demo khata is optional: Sheet menu **Karigar → Load sample khata (demo only)**, or PWA **Sheet → Load demo khata**.
    Allow this account. If unverified: **Advanced** → **Go to Karigar ledger (unsafe)** → **Allow**.
    This is the same Allow you already did for FluffyPens. Do it in the **editor**, not in a browser tab of `/exec`.
 5. **Deploy → New deployment → Web app**

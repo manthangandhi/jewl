@@ -381,6 +381,7 @@ input, select { border: 1px solid var(--line); border-radius: 0; padding: 12px; 
 .tour-card {
   width: min(420px, 100%); background: var(--card); color: var(--ink);
   border: 1px solid var(--line); padding: 20px 18px;
+  position: relative; z-index: 51; pointer-events: auto;
 }
 .tour-card h2 { margin: 8px 0; font-size: 22px; }
 .tour-card p { color: var(--muted); line-height: 1.45; }

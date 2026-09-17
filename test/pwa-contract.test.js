@@ -7,7 +7,7 @@ import { HEADERS } from '../pwa/sheet-model.js';
 const pwa = path.join(process.cwd(), 'pwa');
 
 test('PWA shell files exist for installable Sheets app', () => {
-  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'App.html', 'appsscript.json']) {
+  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'App.html', 'appsscript.json']) {
     assert.equal(fs.existsSync(path.join(pwa, file)), true, file);
   }
   const html = fs.readFileSync(path.join(pwa, 'index.html'), 'utf8');
@@ -22,6 +22,10 @@ test('Apps Script implements load, save, init and the same tabs as the PWA model
   assert.match(gs, /action === "init"/);
   assert.match(gs, /action === "seedDemo"/);
   assert.match(gs, /function seedDemo/);
+  assert.match(gs, /Load sample khata \(demo only\)/);
+  const initFn = gs.match(/function initLedger\(\) \{[\s\S]*?\n\}/);
+  assert.ok(initFn, 'initLedger');
+  assert.doesNotMatch(initFn[0], /seedDemoLedger_/);
   assert.match(gs, /Ramesh Karigar/);
   assert.match(gs, /SCRIPT_PIN/);
   assert.match(gs, /SpreadsheetApp\.getActiveSpreadsheet/);
@@ -82,6 +86,12 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(js, /data-view="help"/);
   assert.match(js, /How this works/);
   assert.match(js, /data-metal-row/);
+  assert.match(js, /resolveTourClick/);
+  assert.match(js, /applyTourNav/);
+  assert.doesNotMatch(js, /tour-card[^\n]*stopPropagation/);
+  assert.doesNotMatch(js, /onclick="event\.stopPropagation\(\)"/);
+  assert.doesNotMatch(js, /suppliers\.length && !state\.money\.length[\s\S]{0,120}seedDemoIntoSheet/);
+  assert.doesNotMatch(js, /seedDemoIntoSheet\(\{\s*silent:\s*true/);
   assert.doesNotMatch(js, /rememberedPinOk/);
   assert.doesNotMatch(js, /data-view="dashboard"/);
   assert.match(css, /shop-nav/);
