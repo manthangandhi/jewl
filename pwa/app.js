@@ -1,7 +1,7 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
-  buildDemoLedger, mergeDemoLedger
+  buildDemoLedger, mergeDemoLedger, dedupePartyLedger, dealIsValid, splitDeal
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
@@ -11,6 +11,14 @@ const URL_KEY = 'karigar.appsScriptUrl';
 const CACHE_KEY = 'karigar.ledgerCache';
 const PIN_FP_KEY = 'karigar.pinFp';
 const SESSION_UNLOCK_KEY = 'karigar.sessionUnlock';
+const TOUR_KEY = 'karigar.tourDone';
+const TOUR = [
+  { title: 'One card per party', body: 'A party is one karigar or supplier. Do not add another card for their phone number, or a separate card for gold vs silver. Cash and every metal sit on the same khata.' },
+  { title: 'Hume dena / Unse lena', body: 'Hume dena = we owe them rupees. Unse lena = they owe us. Metal with the party shows as pills such as GOLD 22K and SILVER 999.' },
+  { title: 'Purchase and payment', body: 'On Purchase you can save rupees, metal, or both together. “Gave metal” is metal you issued. “Got metal” is metal that came back. Add more metal lines for gold and silver in the same bill.' },
+  { title: 'Give / Get metal', body: 'Use these when you only move metal, with no rupee amount. Repeat for any metal and any party.' },
+  { title: 'Refresh data', body: 'Tap Refresh data to reload the Google Sheet. Browser refresh will PIN-check this tab. Lock signs you out.' }
+];
 const root = document.querySelector('#app');
 const emptyTrack = () => ({ suppliers: [], money: [], metal: [], settlements: [], metalMaster: [] });
 const state = {
@@ -40,6 +48,8 @@ const state = {
   reportFrom: '',
   reportTo: '',
   partyFilter: 'all',
+  dealMetalCount: 1,
+  tourStep: null,
   dirty: emptyTrack(),
   deleted: emptyTrack()
 };
@@ -69,6 +79,7 @@ function ic(name) {
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/>',
     chevron: '<path d="M9 6l6 6-6 6"/>',
     refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.8.4-1.4 1-1.4 1.7"/><path d="M12 17h.01"/>',
     masters: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>'
   };
   return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || ''}</svg>`;
@@ -111,7 +122,7 @@ function markDeleted(kind, id) {
 function metalPills(map) {
   const entries = Object.entries(map || {}).filter(([, v]) => Number(v) !== 0);
   if (!entries.length) return '';
-  return `<div class="metal-pills">${entries.map(([key, v]) => `<span class="pill">${esc(key.replace('GOLD:', '').replace('SILVER:', 'Ag '))} · ${grams(v)}</span>`).join('')}</div>`;
+  return `<div class="metal-pills">${entries.map(([key, v]) => `<span class="pill">${esc(String(key).replace(':', ' '))} · ${grams(v)}</span>`).join('')}</div>`;
 }
 
 function refreshSummary() {
@@ -153,13 +164,23 @@ async function sheetsRequest(payload) {
 }
 
 function applyLoaded(data) {
-  state.meta = data.meta || state.meta;
-  state.shopName = data.shopName || data.meta?.shopName || state.shopName;
-  state.suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
-  state.money = Array.isArray(data.money) ? data.money : [];
-  state.metal = Array.isArray(data.metal) ? data.metal : [];
-  state.settlements = Array.isArray(data.settlements) ? data.settlements : [];
-  state.metalMaster = seedMetalMaster(Array.isArray(data.metalMaster) ? data.metalMaster : []);
+  const incoming = {
+    meta: data.meta || state.meta,
+    suppliers: Array.isArray(data.suppliers) ? data.suppliers : [],
+    money: Array.isArray(data.money) ? data.money : [],
+    metal: Array.isArray(data.metal) ? data.metal : [],
+    settlements: Array.isArray(data.settlements) ? data.settlements : [],
+    metalMaster: seedMetalMaster(Array.isArray(data.metalMaster) ? data.metalMaster : [])
+  };
+  const cleaned = dedupePartyLedger(incoming);
+  state.needsDedupeSave = cleaned.suppliers.length < incoming.suppliers.length;
+  state.meta = cleaned.meta;
+  state.shopName = data.shopName || cleaned.meta?.shopName || state.shopName;
+  state.suppliers = cleaned.suppliers;
+  state.money = cleaned.money;
+  state.metal = cleaned.metal;
+  state.settlements = cleaned.settlements;
+  state.metalMaster = cleaned.metalMaster;
   state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl || '';
   state.lastSavedAt = data.lastSavedAt || data.meta?.lastSavedAt || state.lastSavedAt;
   state.unlocked = true;
@@ -250,6 +271,10 @@ async function refreshFromSheet() {
     applyLoaded(merged);
     writeCache();
     state.error = null;
+    if (state.needsDedupeSave) {
+      state.needsDedupeSave = false;
+      await persist();
+    }
     if (!state.suppliers.length && !state.money.length) {
       await seedDemoIntoSheet({ silent: true });
     }
@@ -317,7 +342,10 @@ function partyRows() {
   if (state.partyFilter === 'owe') rows = rows.filter((row) => Number(row.payable) > 0);
   if (state.partyFilter === 'collect') rows = rows.filter((row) => Number(row.payable) < 0);
   if (!q) return rows;
-  return rows.filter((row) => String(row.name || '').toLowerCase().includes(q));
+  return rows.filter((row) => {
+    const party = state.suppliers.find((s) => s.id === row.id) || {};
+    return String(row.name || '').toLowerCase().includes(q) || String(party.phone || '').toLowerCase().includes(q);
+  });
 }
 
 function currentReportRange() {
@@ -522,9 +550,10 @@ function partiesHome() {
       <div class="party-list">${rows.map((row) => {
     const dir = moneyDirection(row.payable);
     const metal = metalPills(row.metalByPurity);
+    const party = state.suppliers.find((s) => s.id === row.id) || {};
     return `<button type="button" class="cell ${dir.tone}" data-supplier="${esc(row.id)}">
         <span class="avatar">${esc(initials(row.name))}</span>
-        <span class="cell-main"><strong>${esc(row.name)}</strong>${metal || ''}</span>
+        <span class="cell-main"><strong>${esc(row.name)}</strong>${party.phone ? `<small>${esc(party.phone)}</small>` : ''}${metal || ''}</span>
         <span class="cell-trail ${dir.tone}">${dir.amount ? `<em>${dir.label}</em><b>${money(dir.amount)}</b>` : '<b class="zero">—</b>'}</span>
         ${ic('chevron')}
       </button>`;
@@ -665,6 +694,47 @@ function reportView() {
     </div>`;
 }
 
+function helpView() {
+  return `<section class="help-page list-card grow">
+    <div class="list-head"><span>How this works</span><button type="button" class="btn-plain" data-action="tour-start">Start tour</button></div>
+    <div class="help-body">
+      <h2>Parties</h2>
+      <p>One card is one person or firm. Put their name and phone on that card. Gold, silver, and any other metal all belong to that same party — never make a second party for a metal or for the mobile number.</p>
+      <h2>Hume dena / Unse lena</h2>
+      <p><strong>Hume dena</strong> is rupees we owe them (purchases minus payments). <strong>Unse lena</strong> is rupees they owe us (for example an advance). Metal with them is separate, shown as GOLD 22K / SILVER 999 pills.</p>
+      <h2>Purchase</h2>
+      <p>Use Purchase for a bill. Fill amount ₹, or metal, or both. Add extra metal lines if the same bill has gold and silver. Leave amount blank when it is metal-only.</p>
+      <h2>Payment</h2>
+      <p>Use Payment when you pay them. You can also record metal that moved with that payment.</p>
+      <h2>Give metal / Get metal</h2>
+      <p>Use these when only metal moves: you issue gold for jobwork, or you receive it back. Same party, any metal, as many times as needed.</p>
+      <h2>Settle</h2>
+      <p>Close cash and/or metal against the running khata when you square the account.</p>
+      <h2>Refresh data</h2>
+      <p>Tap <strong>Refresh data</strong> in the header to pull the Sheet. That does not lock you out. The browser refresh button will ask for PIN again on this tab.</p>
+      <h2>Masters</h2>
+      <p>Add any metal and purity you use (gold 20K, platinum, etc.). Purchase and Give/Get metal then offer those in the dropdowns.</p>
+    </div>
+  </section>`;
+}
+
+function tourOverlay() {
+  if (state.tourStep == null || state.tourStep < 0) return '';
+  const step = TOUR[state.tourStep] || TOUR[0];
+  const last = state.tourStep >= TOUR.length - 1;
+  return `<div class="tour-backdrop" data-action="tour-skip">
+    <section class="tour-card" onclick="event.stopPropagation()">
+      <p class="eyebrow">How this works · ${state.tourStep + 1} / ${TOUR.length}</p>
+      <h2>${esc(step.title)}</h2>
+      <p>${esc(step.body)}</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-soft" data-action="tour-skip">Skip</button>
+        <button type="button" class="btn btn-primary" data-action="tour-next">${last ? 'Done' : 'Next'}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 function booksView() {
   return `<section class="settings-list">
     <button class="cell" data-action="refresh" type="button">
@@ -695,6 +765,7 @@ function viewContent() {
   if (state.view === 'today') return reportView();
   if (state.view === 'masters') return mastersView();
   if (state.view === 'books') return booksView();
+  if (state.view === 'help') return helpView();
   return partiesHome();
 }
 
@@ -702,6 +773,7 @@ function viewTitle() {
   if (state.view === 'report' || state.view === 'today') return 'Report';
   if (state.view === 'masters') return 'Masters';
   if (state.view === 'books') return 'Sheet';
+  if (state.view === 'help') return 'How this works';
   if (state.view === 'supplier') return '';
   return 'Parties';
 }
@@ -713,6 +785,7 @@ function render() {
   const navToday = state.view === 'report' || state.view === 'today' ? 'active' : '';
   const navMasters = state.view === 'masters' ? 'active' : '';
   const navBooks = state.view === 'books' ? 'active' : '';
+  const navHelp = state.view === 'help' ? 'active' : '';
   root.innerHTML = `<div class="shop">
     <aside class="shop-nav" aria-label="Shop">
       <div class="nav-brand"><span class="brand-mark">K</span> <span>Karigar</span></div>
@@ -720,6 +793,7 @@ function render() {
       <button class="nav-item ${navToday}" data-view="report" type="button">${ic('report')}<span>Report</span></button>
       <button class="nav-item ${navMasters}" data-view="masters" type="button">${ic('masters')}<span>Masters</span></button>
       <button class="nav-item ${navBooks}" data-view="books" type="button">${ic('sheet')}<span>Sheet</span></button>
+      <button class="nav-item ${navHelp}" data-view="help" type="button">${ic('help')}<span>How to</span></button>
       <button class="nav-item nav-lock" data-action="logout" type="button">${ic('lock')}<span>Lock</span></button>
     </aside>
     <div class="shop-body">
@@ -731,6 +805,7 @@ function render() {
           <button class="btn-refresh" data-action="refresh" type="button" ${state.syncing ? 'disabled' : ''} aria-label="Refresh data">
             ${ic('refresh')}<span>Refresh data</span>
           </button>
+          <button class="icon-btn" data-view="help" type="button" aria-label="How this works">${ic('help')}</button>
           <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock">${ic('lock')}</button>
         </div>
       </header>
@@ -740,6 +815,7 @@ function render() {
       </main>
     </div>
     ${state.modal ? modal() : ''}
+    ${tourOverlay()}
   </div>`;
   bind();
 }
@@ -760,6 +836,49 @@ function supplierModal() {
       `}
       <div class="form-actions">
         ${e.id ? '<button type="button" class="btn btn-soft" data-delete="supplier">Delete party</button>' : ''}
+        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </section></div>`;
+}
+
+function metalLineHtml(i, draft = {}) {
+  const type = draft[`metalType_${i}`] || 'GOLD';
+  const dir = draft[`metalDir_${i}`] || 'ISSUE';
+  const pur = draft[`purity_${i}`] || '22K';
+  return `<div class="metal-line" data-metal-row="${i}">
+      <label>I
+        <select name="metalDir_${i}">
+          <option value="ISSUE" ${dir === 'ISSUE' ? 'selected' : ''}>Gave metal</option>
+          <option value="RECEIPT" ${dir === 'RECEIPT' ? 'selected' : ''}>Got metal</option>
+        </select>
+      </label>
+      <label>Metal<select name="metalType_${i}">${metalTypeOptions(type)}</select></label>
+      <label>Purity<select name="purity_${i}">${purityOptions(type, pur)}</select></label>
+      <label>Grams<input name="metalGrams_${i}" type="number" min="0" step="0.001" inputmode="decimal" placeholder="0" value="${esc(draft[`metalGrams_${i}`] || '')}"></label>
+    </div>`;
+}
+
+function dealModal(type) {
+  const locked = Boolean(state.supplierId);
+  const count = Math.max(1, Number(state.dealMetalCount || 1));
+  const isPay = type === 'PAYMENT';
+  const draft = state.dealDraft || {};
+  return `<div class="modal-backdrop"><section class="modal">
+    <div class="section-head"><h2>${isPay ? 'Payment' : 'Purchase'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <p class="lede">Fill rupees, metal, or both. One party can have gold, silver, and any other metal on the same khata.</p>
+    <form id="data-form" data-kind="deal">
+      ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Party<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${(draft.supplierId || state.supplierId) === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+      <input type="hidden" name="type" value="${esc(isPay ? 'PAYMENT' : 'PURCHASE')}">
+      <label>Amount ₹ (optional)<input name="amountInr" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Leave blank if metal only" value="${esc(draft.amountInr || '')}"></label>
+      <div class="metal-block">
+        <div class="list-head"><span>Metal (optional)</span><button type="button" class="btn-plain" data-action="add-metal-row">+ Metal</button></div>
+        ${Array.from({ length: count }, (_, i) => metalLineHtml(i, draft)).join('')}
+      </div>
+      <label>Date<input name="date" type="date" value="${esc(draft.date || today())}" required></label>
+      <label>Note<input name="note" placeholder="Bill no. / optional" value="${esc(draft.note || '')}"></label>
+      <div class="form-actions">
         <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
         <button class="btn btn-primary">Save</button>
       </div>
@@ -847,7 +966,8 @@ function settleModal() {
 function modal() {
   const kind = state.modal;
   if (kind === 'supplier') return supplierModal();
-  if (kind === 'purchase' || kind === 'payment' || kind === 'money') return moneyModal(kind === 'payment' ? 'PAYMENT' : 'PURCHASE');
+  if (kind === 'purchase' || kind === 'payment') return dealModal(kind === 'payment' ? 'PAYMENT' : 'PURCHASE');
+  if (kind === 'money') return moneyModal('PURCHASE');
   if (kind === 'issue' || kind === 'receive' || kind === 'metal') return metalModal(kind === 'receive' ? 'RECEIPT' : 'ISSUE');
   if (kind === 'settle') return settleModal();
   if (kind === 'metalMaster') return metalMasterModal();
@@ -955,7 +1075,37 @@ function bind() {
         return;
       }
       if (action === 'close') { state.modal = null; state.editing = null; render(); }
-      else if (action === 'modal') { state.editing = null; state.modal = target.dataset.modal; render(); }
+      else if (action === 'modal') {
+        state.editing = null;
+        state.modal = target.dataset.modal;
+        if (state.modal === 'purchase' || state.modal === 'payment') {
+          state.dealMetalCount = 1;
+          state.dealDraft = {};
+        }
+        render();
+      } else if (action === 'add-metal-row') {
+        const form = root.querySelector('#data-form');
+        if (form) state.dealDraft = Object.fromEntries(new FormData(form));
+        state.dealMetalCount = Math.min(6, Number(state.dealMetalCount || 1) + 1);
+        render();
+        return;
+      } else if (action === 'tour-start') {
+        state.tourStep = 0;
+        render();
+        return;
+      } else if (action === 'tour-next') {
+        if (state.tourStep >= TOUR.length - 1) {
+          state.tourStep = null;
+          try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* ignore */ }
+        } else state.tourStep += 1;
+        render();
+        return;
+      } else if (action === 'tour-skip') {
+        state.tourStep = null;
+        try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* ignore */ }
+        render();
+        return;
+      }
       else if (action === 'logout') logout();
       else if (action === 'setup') { state.setupOpen = !state.setupOpen; state.gate = 'login'; landing(); }
       else if (action === 'refresh') await refreshFromSheet();
@@ -1044,6 +1194,11 @@ function bind() {
   const purity = root.querySelector('select[name="purity"]');
   if (metalType && purity) {
     metalType.onchange = () => { purity.innerHTML = purityOptions(metalType.value || 'GOLD', purity.value); };
+  }
+  for (const typeSel of root.querySelectorAll('select[name^="metalType_"]')) {
+    const i = String(typeSel.name).slice('metalType_'.length);
+    const pur = root.querySelector(`select[name="purity_${i}"]`);
+    if (pur) typeSel.onchange = () => { pur.innerHTML = purityOptions(typeSel.value || 'GOLD', pur.value); };
   }
   for (const form of root.querySelectorAll('form')) form.onsubmit = submitForm;
 }
@@ -1161,6 +1316,38 @@ async function submitForm(event) {
         state.view = 'supplier';
         state.supplierId = row.id;
       }
+    } else if (kind === 'deal') {
+      const metals = [];
+      for (let i = 0; i < 8; i++) {
+        if (data[`metalType_${i}`] == null && data[`metalGrams_${i}`] == null) continue;
+        metals.push({
+          metalType: data[`metalType_${i}`],
+          purity: data[`purity_${i}`],
+          direction: data[`metalDir_${i}`] || 'ISSUE',
+          weightGrams: data[`metalGrams_${i}`]
+        });
+      }
+      if (!dealIsValid({ amountInr: data.amountInr, metals })) {
+        throw new Error('Enter rupees, or metal grams, or both');
+      }
+      const parts = splitDeal({
+        supplierId: data.supplierId || state.supplierId,
+        type: data.type,
+        amountInr: data.amountInr,
+        date: data.date,
+        note: data.note,
+        metals
+      });
+      for (const row of parts.money) {
+        const mid = nid();
+        state.money = upsertById(state.money, stamp({ ...row, id: mid }, true));
+        markDirty('money', mid);
+      }
+      for (const row of parts.metal) {
+        const tid = nid();
+        state.metal = upsertById(state.metal, stamp({ ...row, id: tid }, true));
+        markDirty('metal', tid);
+      }
     } else if (kind === 'money') {
       state.money = upsertById(state.money, stamp({
         ...(state.editing || {}), id, supplierId: data.supplierId || state.supplierId, type: data.type,
@@ -1216,6 +1403,9 @@ async function enterUnlocked() {
     state.unlocked = true;
     refreshSummary();
   }
+  try {
+    if (!localStorage.getItem(TOUR_KEY) && state.tourStep == null) state.tourStep = 0;
+  } catch { /* ignore */ }
   render();
   await refreshFromSheet();
 }
@@ -1255,7 +1445,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.getRegistrations()
     .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
     .then(() => caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))))
-    .then(() => navigator.serviceWorker.register('./service-worker.js?v=14'))
+    .then(() => navigator.serviceWorker.register('./service-worker.js?v=15'))
     .catch(() => {});
 }
 

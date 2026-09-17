@@ -120,6 +120,108 @@ export function buildDemoLedger(asOf = new Date()) {
   };
 }
 
+export function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+export function isPhoneLike(value) {
+  const d = digitsOnly(value);
+  if (d.length < 8 || d.length > 15) return false;
+  const compact = String(value || '').replace(/[\s\-+()]/g, '');
+  return d.length >= Math.min(8, compact.length);
+}
+
+function sameParty(a, b) {
+  const ap = digitsOnly(a.phone);
+  const bp = digitsOnly(b.phone);
+  const an = digitsOnly(a.name);
+  const bn = digitsOnly(b.name);
+  if (ap && (ap === bp || ap === bn)) return true;
+  if (bp && bp === an) return true;
+  const na = String(a.name || '').trim().toLowerCase();
+  const nb = String(b.name || '').trim().toLowerCase();
+  if (na && na === nb && (!ap || !bp || ap === bp)) return true;
+  return false;
+}
+
+function preferParty(a, b) {
+  const out = { ...a };
+  if (isPhoneLike(out.name) && !isPhoneLike(b.name) && String(b.name || '').trim()) {
+    out.phone = out.phone || out.name;
+    out.name = b.name;
+  } else if (!String(out.name || '').trim() && b.name) {
+    out.name = b.name;
+  }
+  if (!digitsOnly(out.phone)) out.phone = b.phone || (isPhoneLike(b.name) ? b.name : out.phone) || '';
+  if (!out.city) out.city = b.city || '';
+  if (!out.notes) out.notes = b.notes || '';
+  if (!out.id) out.id = b.id;
+  return out;
+}
+
+export function dedupePartyLedger(ledger) {
+  const list = (ledger?.suppliers || []).filter((row) => row && (row.id || row.name || row.phone));
+  const kept = [];
+  const idMap = {};
+  for (const row of list) {
+    const idx = kept.findIndex((k) => sameParty(k, row));
+    if (idx === -1) {
+      kept.push({ ...row });
+      if (row.id) idMap[String(row.id)] = String(row.id);
+      continue;
+    }
+    const merged = preferParty(kept[idx], row);
+    const keepId = String(merged.id || kept[idx].id || row.id || '');
+    merged.id = keepId;
+    if (kept[idx].id) idMap[String(kept[idx].id)] = keepId;
+    if (row.id) idMap[String(row.id)] = keepId;
+    kept[idx] = merged;
+  }
+  const remap = (rows) => (rows || []).map((row) => ({
+    ...row,
+    supplierId: idMap[String(row.supplierId || '')] || row.supplierId
+  }));
+  return {
+    ...ledger,
+    suppliers: kept,
+    money: remap(ledger?.money),
+    metal: remap(ledger?.metal),
+    settlements: remap(ledger?.settlements)
+  };
+}
+
+export function dealIsValid({ amountInr, metals } = {}) {
+  if (Number(amountInr || 0) > 0) return true;
+  return (metals || []).some((m) => Number(m.weightGrams || 0) > 0 && m.metalType && m.purity);
+}
+
+export function splitDeal({ supplierId, type, amountInr, date, note, metals } = {}) {
+  const money = [];
+  const metal = [];
+  if (Number(amountInr || 0) > 0) {
+    money.push({
+      supplierId,
+      type: type || 'PURCHASE',
+      amountInr: Number(amountInr),
+      date,
+      note: note || ''
+    });
+  }
+  for (const m of metals || []) {
+    if (!(Number(m.weightGrams || 0) > 0 && m.metalType && m.purity)) continue;
+    metal.push({
+      supplierId,
+      direction: m.direction || 'ISSUE',
+      metalType: String(m.metalType || '').toUpperCase(),
+      purity: m.purity,
+      weightGrams: Number(m.weightGrams),
+      date,
+      note: note || ''
+    });
+  }
+  return { money, metal };
+}
+
 export function mergeDemoLedger(ledger, demo) {
   const next = { ...(ledger || emptyLedger()) };
   for (const key of ['suppliers', 'money', 'metal', 'settlements']) {

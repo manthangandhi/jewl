@@ -91,6 +91,54 @@ test('demo ledger is a jewellery khata spanning about three months', async () =>
   assert.ok(ledger.metalMaster.some((row) => row.rateInrPerGram > 0));
 });
 
+test('duplicate parties that are the same person by phone are merged into one', async () => {
+  const { dedupePartyLedger } = await import('../pwa/sheet-model.js');
+  const { summarizeLedger } = await import('../pwa/ledger-math.js');
+  const ledger = {
+    suppliers: [
+      { id: 's-name', name: 'Ramesh Karigar', phone: '98200 11122' },
+      { id: 's-phone', name: '9820011122', phone: '' }
+    ],
+    money: [
+      { id: 'm1', supplierId: 's-name', type: 'PURCHASE', amountInr: 1000 },
+      { id: 'm2', supplierId: 's-phone', type: 'PURCHASE', amountInr: 500 }
+    ],
+    metal: [
+      { id: 't1', supplierId: 's-name', direction: 'ISSUE', metalType: 'GOLD', purity: '22K', weightGrams: 10 },
+      { id: 't2', supplierId: 's-phone', direction: 'ISSUE', metalType: 'SILVER', purity: '999', weightGrams: 200 }
+    ],
+    settlements: []
+  };
+  const next = dedupePartyLedger(ledger);
+  assert.equal(next.suppliers.length, 1);
+  assert.equal(next.suppliers[0].name, 'Ramesh Karigar');
+  assert.match(String(next.suppliers[0].phone).replace(/\D/g, ''), /9820011122/);
+  const summary = summarizeLedger(next.suppliers, next.money, next.metal, next.settlements);
+  assert.equal(summary.bySupplier.length, 1);
+  assert.equal(summary.bySupplier[0].payable, 1500);
+  assert.equal(summary.bySupplier[0].metalByPurity['GOLD:22K'], 10);
+  assert.equal(summary.bySupplier[0].metalByPurity['SILVER:999'], 200);
+});
+
+test('a deal is valid with rupees, metal, or both, and splits into journal rows', async () => {
+  const { dealIsValid, splitDeal } = await import('../pwa/sheet-model.js');
+  assert.equal(dealIsValid({ amountInr: '', metals: [] }), false);
+  assert.equal(dealIsValid({ amountInr: 100, metals: [] }), true);
+  assert.equal(dealIsValid({ amountInr: 0, metals: [{ metalType: 'GOLD', purity: '22K', weightGrams: 5, direction: 'ISSUE' }] }), true);
+  const both = splitDeal({
+    supplierId: 's1', type: 'PURCHASE', amountInr: 25000, date: '2026-09-17', note: 'mix',
+    metals: [
+      { metalType: 'GOLD', purity: '22K', weightGrams: 8, direction: 'ISSUE' },
+      { metalType: 'SILVER', purity: '999', weightGrams: 50, direction: 'RECEIPT' }
+    ]
+  });
+  assert.equal(both.money.length, 1);
+  assert.equal(both.money[0].amountInr, 25000);
+  assert.equal(both.metal.length, 2);
+  assert.equal(both.metal[0].metalType, 'GOLD');
+  assert.equal(both.metal[1].metalType, 'SILVER');
+});
+
 test('prepareSavePayload writes supplier names and party balances for the sheet', () => {
   const ledger = emptyLedger();
   ledger.suppliers = [{ id: 's1', name: 'Kiran', status: 'ACTIVE' }];
