@@ -60,109 +60,6 @@ test('deleting a supplier also deletes that party journals', () => {
   assert.equal(next.settlements.length, 1);
 });
 
-test('demo ledger is a jewellery khata spanning about three months', async () => {
-  const { buildDemoLedger } = await import('../pwa/sheet-model.js');
-  const { summarizeLedger, reportForRange, rangeForPreset } = await import('../pwa/ledger-math.js');
-  const asOf = new Date(2026, 8, 17);
-  const ledger = buildDemoLedger(asOf);
-  assert.ok(ledger.suppliers.length >= 5);
-  assert.ok(ledger.suppliers.every((row) => row.name && row.city));
-  assert.ok(ledger.money.some((row) => row.type === 'OPENING'));
-  assert.ok(ledger.money.some((row) => row.type === 'PURCHASE'));
-  assert.ok(ledger.money.some((row) => row.type === 'PAYMENT'));
-  assert.ok(ledger.metal.some((row) => row.direction === 'ISSUE'));
-  assert.ok(ledger.metal.some((row) => row.direction === 'RECEIPT'));
-  assert.ok(ledger.settlements.length >= 1);
-  const dates = [...ledger.money, ...ledger.metal, ...ledger.settlements].map((row) => String(row.date).slice(0, 10)).sort();
-  assert.ok(dates[0] <= '2026-06-25');
-  assert.ok(dates[dates.length - 1] >= '2026-09-10');
-  const spanDays = (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000;
-  assert.ok(spanDays >= 80, `span ${spanDays}`);
-  const summary = summarizeLedger(ledger.suppliers, ledger.money, ledger.metal, ledger.settlements);
-  assert.ok(summary.bySupplier.some((row) => row.payable > 0), 'hume dena party');
-  assert.ok(summary.bySupplier.some((row) => row.payable < 0), 'unse lena party');
-  assert.ok(summary.bySupplier.some((row) => Object.keys(row.metalByPurity || {}).length > 0), 'metal with a party');
-  const month = reportForRange({ ...ledger, ...rangeForPreset('month', asOf) });
-  const all = reportForRange({ ...ledger, from: '', to: '' });
-  const week = reportForRange({ ...ledger, ...rangeForPreset('7d', asOf) });
-  assert.ok(all.purchases > month.purchases);
-  assert.ok(month.purchases > week.purchases);
-  assert.ok(all.count > month.count);
-  assert.ok(ledger.metalMaster.some((row) => row.rateInrPerGram > 0));
-});
-
-test('demo parties always have a human name; phone lives in phone only', async () => {
-  const { buildDemoLedger, dedupePartyLedger, isPhoneLike } = await import('../pwa/sheet-model.js');
-  const expected = [
-    'Ramesh Karigar',
-    'Suresh Jewels',
-    'Mehta Silver House',
-    'Fatima Polishing Works',
-    'Gupta Casting Co',
-    'Kiran Chain Maker'
-  ];
-  const ledger = buildDemoLedger(new Date(2026, 8, 17));
-  assert.equal(ledger.suppliers.length, 6);
-  assert.deepEqual(ledger.suppliers.map((row) => row.name).sort(), expected.slice().sort());
-  for (const party of ledger.suppliers) {
-    assert.ok(party.name);
-    assert.equal(isPhoneLike(party.name), false);
-    assert.notEqual(String(party.name).replace(/\D/g, ''), String(party.phone).replace(/\D/g, ''));
-    assert.ok(String(party.phone).replace(/\D/g, '').length >= 8);
-    assert.match(String(party.id), /^demo-/);
-  }
-  const cleaned = dedupePartyLedger(ledger);
-  assert.equal(cleaned.suppliers.length, 6);
-  assert.deepEqual(cleaned.suppliers.map((row) => row.name).sort(), expected.slice().sort());
-});
-
-test('demo money, metal and settlement rows use the party name, never a mobile', async () => {
-  const { buildDemoLedger, isPhoneLike } = await import('../pwa/sheet-model.js');
-  const ledger = buildDemoLedger(new Date(2026, 8, 17));
-  const names = Object.fromEntries(ledger.suppliers.map((row) => [row.id, row.name]));
-  const rows = [...ledger.money, ...ledger.metal, ...ledger.settlements];
-  assert.ok(rows.length > 0);
-  for (const row of rows) {
-    assert.equal(row.supplierName, names[row.supplierId]);
-    assert.ok(row.supplierName);
-    assert.equal(isPhoneLike(row.supplierName), false);
-  }
-});
-
-test('replaceDemoLedger drops demo- rows then inserts demo, keeping live parties and shopName', async () => {
-  const { buildDemoLedger, replaceDemoLedger, emptyLedger } = await import('../pwa/sheet-model.js');
-  const live = emptyLedger();
-  live.meta = { shopName: 'Gandhi Jewellers', schemaVersion: '1' };
-  live.suppliers = [
-    { id: 'live-1', name: 'Local Karigar', phone: '90000 11111', status: 'ACTIVE' },
-    { id: 'demo-ramesh', name: '98200 11122', phone: '98200 11122', status: 'ACTIVE' },
-    { id: 'demo-junk', name: '9090909090', phone: '9090909090', status: 'ACTIVE' }
-  ];
-  live.money = [
-    { id: 'live-m1', supplierId: 'live-1', supplierName: 'Local Karigar', type: 'PURCHASE', amountInr: 10 },
-    { id: 'demo-m-r-op', supplierId: 'demo-ramesh', supplierName: '98200 11122', type: 'OPENING', amountInr: 1 }
-  ];
-  live.metal = [
-    { id: 'demo-t-r-op', supplierId: 'demo-ramesh', supplierName: '98200 11122', direction: 'OPENING', metalType: 'GOLD', purity: '22K', weightGrams: 1 }
-  ];
-  live.settlements = [
-    { id: 'demo-x-r1', supplierId: 'demo-ramesh', supplierName: '98200 11122', moneyAmountInr: 1 }
-  ];
-  const demo = buildDemoLedger(new Date(2026, 8, 17));
-  const next = replaceDemoLedger(live, demo);
-  assert.equal(next.meta.shopName, 'Gandhi Jewellers');
-  assert.ok(next.suppliers.some((row) => row.id === 'live-1' && row.name === 'Local Karigar'));
-  assert.equal(next.suppliers.filter((row) => String(row.id).startsWith('demo-')).length, 6);
-  assert.equal(next.suppliers.some((row) => row.id === 'demo-junk'), false);
-  const ramesh = next.suppliers.find((row) => row.id === 'demo-ramesh');
-  assert.equal(ramesh.name, 'Ramesh Karigar');
-  assert.match(String(ramesh.phone).replace(/\D/g, ''), /9820011122/);
-  assert.ok(next.money.some((row) => row.id === 'live-m1'));
-  assert.equal(next.money.find((row) => row.id === 'demo-m-r-op').supplierName, 'Ramesh Karigar');
-  assert.equal(next.metal.find((row) => row.id === 'demo-t-r-op').supplierName, 'Ramesh Karigar');
-  assert.equal(next.settlements.find((row) => row.id === 'demo-x-r1').supplierName, 'Ramesh Karigar');
-});
-
 test('assertPartyName refuses a mobile number as the party name', async () => {
   const { assertPartyName } = await import('../pwa/sheet-model.js');
   assert.equal(assertPartyName('Ramesh Karigar'), 'Ramesh Karigar');
@@ -184,17 +81,6 @@ test('stripDemoLedger removes demo- rows and leaves live parties', async () => {
   const next = stripDemoLedger(live);
   assert.deepEqual(next.suppliers.map((row) => row.id), ['live-1']);
   assert.deepEqual(next.money.map((row) => row.id), ['live-m1']);
-});
-
-test('replaceDemoLedger then dedupe keeps the live name when the mobile matches a demo party', async () => {
-  const { buildDemoLedger, replaceDemoLedger, dedupePartyLedger, emptyLedger } = await import('../pwa/sheet-model.js');
-  const live = emptyLedger();
-  live.suppliers = [{ id: 'p1', name: '9820011122', phone: '98200 11122' }];
-  live.money = [{ id: 'm1', supplierId: 'p1', supplierName: '9820011122', type: 'PURCHASE', amountInr: 50 }];
-  const next = dedupePartyLedger(replaceDemoLedger(live, buildDemoLedger(new Date(2026, 8, 17))));
-  const ramesh = next.suppliers.filter((row) => String(row.phone || '').replace(/\D/g, '') === '9820011122');
-  assert.equal(ramesh.length, 1);
-  assert.equal(ramesh[0].name, 'Ramesh Karigar');
 });
 
 test('a party is identified by name, never by a mobile number', async () => {

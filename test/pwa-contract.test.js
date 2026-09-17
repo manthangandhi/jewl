@@ -21,6 +21,7 @@ test('Apps Script implements load, save, init and the same tabs as the PWA model
   assert.match(gs, /action === "save"/);
   assert.match(gs, /action === "init"/);
   assert.match(gs, /action === "seedDemo"/);
+  assert.match(gs, /action === "clearDemo"/);
   assert.match(gs, /function seedDemo/);
   assert.match(gs, /Load sample khata \(demo only\)/);
   const initFn = gs.match(/function initLedger\(\) \{[\s\S]*?\n\}/);
@@ -76,14 +77,14 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(js, /applyPinKey/);
   assert.match(js, /shouldHandlePinKeyboard/);
   assert.match(js, /desk-col/);
-  assert.match(js, /buildDemoLedger/);
-  assert.match(js, /replaceDemoLedger/);
-  assert.match(js, /dedupePartyLedger\(replaceDemoLedger/);
-  assert.match(js, /stripDemoLedger/);
-  assert.match(js, /data-action="strip-demo"/);
   assert.match(js, /assertPartyName/);
-  assert.doesNotMatch(js, /mergeDemoLedger/);
   assert.match(js, /data-action="seed-demo"/);
+  assert.match(js, /data-action="strip-demo"/);
+  assert.match(js, /action:\s*['"]seedDemo['"]/);
+  assert.match(js, /action:\s*['"]clearDemo['"]/);
+  assert.doesNotMatch(js, /buildDemoLedger/);
+  assert.doesNotMatch(js, /replaceDemoLedger/);
+  assert.doesNotMatch(js, /mergeDemoLedger/);
   assert.match(js, /appbar-end[\s\S]{0,500}data-action="refresh"/);
   assert.match(js, /Refresh data/);
   assert.match(js, /toSessionUnlock/);

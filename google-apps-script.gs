@@ -63,6 +63,7 @@ function onOpen() {
     .addItem("Authorise this Sheet", "authorizeKarigar")
     .addItem("Create tabs", "initLedger")
     .addItem("Load sample khata (demo only)", "seedDemo")
+    .addItem("Remove sample khata", "clearDemo")
     .addToUi();
 }
 
@@ -133,7 +134,8 @@ function doPost(e) {
     if (body.action === "init") return jsonOut_(initLedger());
     if (body.action === "load") return jsonOut_(loadLedger_());
     if (body.action === "save") return jsonOut_(saveLedger_(body));
-    if (body.action === "seedDemo") return jsonOut_(seedDemoLedger_({ force: Boolean(body.force) }));
+    if (body.action === "seedDemo") return jsonOut_(seedDemoLedger_({ force: Boolean(body.force), replace: body.replace !== false }));
+    if (body.action === "clearDemo") return jsonOut_(clearDemoLedger_());
     return jsonOut_(loadLedger_());
   } catch (err) {
     return jsonOut_({ ok: false, unlocked: false, error: String(err) });
@@ -160,11 +162,15 @@ function initLedger() {
 }
 
 function seedDemo() {
-  return seedDemoLedger_({ force: false });
+  return seedDemoLedger_({ replace: true });
 }
 
 function seedDemoForce() {
-  return seedDemoLedger_({ force: true });
+  return seedDemoLedger_({ force: true, replace: true });
+}
+
+function clearDemo() {
+  return clearDemoLedger_();
 }
 
 function isoDaysAgo_(n) {
@@ -264,30 +270,43 @@ function demoLedger_() {
   };
 }
 
+function isDemoId_(id) {
+  return String(id || "").indexOf("demo-") === 0;
+}
+
+function dropDemoRows_(rows) {
+  return (rows || []).filter(function (row) { return !isDemoId_(row.id); });
+}
+
 function seedDemoLedger_(opt) {
   const force = opt && opt.force;
+  const replace = opt && opt.replace;
   const existing = readRowsAsObjects_("Suppliers");
-  if (existing.length && !force) {
+  const live = dropDemoRows_(existing);
+  if (live.length && !replace && !force) {
     return { ok: true, seeded: false, reason: "already-has-parties", spreadsheetUrl: spreadsheetUrl_() };
   }
   const demo = demoLedger_();
-  const names = {};
-  demo.suppliers.forEach(function (s) { names[s.id] = s.name; });
-  function named(rows) {
-    return rows.map(function (row) {
-      row.supplierName = names[row.supplierId] || "";
-      return row;
-    });
-  }
   const existingMeta = metaObject_(readRowsAsObjects_("_Meta"));
   const shopName = String((existingMeta && existingMeta.shopName) || "").trim();
   writeMeta_({ shopName: shopName || demo.shopName || "", schemaVersion: "1" });
-  writeObjectsAsRows_("Suppliers", demo.suppliers);
-  writeObjectsAsRows_("Money", named(demo.money));
-  writeObjectsAsRows_("Metal", named(demo.metal));
-  writeObjectsAsRows_("Settlements", named(demo.settlements));
-  writeObjectsAsRows_("MetalMaster", demo.metalMaster);
+  writeObjectsAsRows_("Suppliers", live.concat(demo.suppliers));
+  writeObjectsAsRows_("Money", dropDemoRows_(readRowsAsObjects_("Money")).concat(demo.money));
+  writeObjectsAsRows_("Metal", dropDemoRows_(readRowsAsObjects_("Metal")).concat(demo.metal));
+  writeObjectsAsRows_("Settlements", dropDemoRows_(readRowsAsObjects_("Settlements")).concat(demo.settlements));
+  const master = readRowsAsObjects_("MetalMaster");
+  const byId = {};
+  master.concat(demo.metalMaster).forEach(function (row) { if (row.id) byId[row.id] = row; });
+  writeObjectsAsRows_("MetalMaster", Object.keys(byId).map(function (id) { return byId[id]; }));
   return { ok: true, seeded: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
+}
+
+function clearDemoLedger_() {
+  writeObjectsAsRows_("Suppliers", dropDemoRows_(readRowsAsObjects_("Suppliers")));
+  writeObjectsAsRows_("Money", dropDemoRows_(readRowsAsObjects_("Money")));
+  writeObjectsAsRows_("Metal", dropDemoRows_(readRowsAsObjects_("Metal")));
+  writeObjectsAsRows_("Settlements", dropDemoRows_(readRowsAsObjects_("Settlements")));
+  return { ok: true, cleared: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
 }
 
 function loadLedger_() {

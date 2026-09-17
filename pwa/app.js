@@ -1,7 +1,7 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
-  buildDemoLedger, replaceDemoLedger, stripDemoLedger, dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName, assertPartyName
+  dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName, assertPartyName
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
@@ -295,23 +295,23 @@ async function refreshFromSheet() {
   }
 }
 
-async function seedDemoIntoSheet({ silent } = {}) {
-  if (!silent) {
-    const warn = state.suppliers.length
-      ? 'This writes a 3-month DEMO khata into this Google Sheet. Existing parties stay. Sample rows use demo- ids. Do not use this on a live shop.'
-      : 'This writes a 3-month DEMO khata into this Google Sheet. Use only to show the product — not for a live shop.';
-    if (!confirm(warn)) return;
-  }
-  const next = dedupePartyLedger(replaceDemoLedger(state, buildDemoLedger(new Date())));
-  state.suppliers = next.suppliers;
-  state.money = next.money;
-  state.metal = next.metal;
-  state.settlements = next.settlements;
-  state.metalMaster = next.metalMaster;
-  state.meta = next.meta;
-  refreshSummary();
-  await persist();
+async function seedDemoIntoSheet() {
+  if (!confirm('Write a 3-month DEMO khata into this Google Sheet? Sample rows use demo- ids. Real parties stay. Do not use this on a live shop.')) return;
+  state.syncing = true;
   render();
+  try {
+    const result = await sheetsRequest({ action: 'seedDemo', replace: true });
+    if (result.seeded === false) {
+      state.error = 'Sheet already has parties. Sample khata was not written.';
+      return;
+    }
+    await refreshFromSheet();
+  } catch (error) {
+    state.error = explainLedgerError(error);
+  } finally {
+    state.syncing = false;
+    if (state.unlocked) render();
+  }
 }
 
 async function stripDemoFromSheet() {
@@ -320,15 +320,18 @@ async function stripDemoFromSheet() {
     render();
     return;
   }
-  if (!confirm('Remove the DEMO sample khata? Real parties stay.')) return;
-  const next = stripDemoLedger(state);
-  state.suppliers = next.suppliers;
-  state.money = next.money;
-  state.metal = next.metal;
-  state.settlements = next.settlements;
-  refreshSummary();
-  await persist();
+  if (!confirm('Remove the DEMO sample khata from this Google Sheet? Real parties stay.')) return;
+  state.syncing = true;
   render();
+  try {
+    await sheetsRequest({ action: 'clearDemo' });
+    await refreshFromSheet();
+  } catch (error) {
+    state.error = explainLedgerError(error);
+  } finally {
+    state.syncing = false;
+    if (state.unlocked) render();
+  }
 }
 
 async function persist() {
@@ -735,7 +738,7 @@ function helpView() {
       <h2>Masters</h2>
       <p>Add any metal and purity you use (gold 20K, platinum, etc.). Purchase and Give/Get metal then offer those in the dropdowns.</p>
       <h2>Demo khata</h2>
-      <p>Sheet → Load demo khata is only for showing the product. A live shop should stay empty until you add real parties.</p>
+      <p>Sheet → Load demo khata writes sample parties into your Google Sheet (not into the app). Remove demo khata deletes those sample rows. A live shop should stay empty until you add real parties.</p>
     </div>
   </section>`;
 }
@@ -768,7 +771,7 @@ function booksView() {
       ${ic('chevron')}
     </button>
     <button class="cell" data-action="seed-demo" type="button">
-      <span class="cell-main"><strong>Load demo khata (optional)</strong><small>For product demos only — replaces sample parties, not your live ones</small></span>
+      <span class="cell-main"><strong>Load demo khata (optional)</strong><small>Writes sample parties into this Google Sheet — not stored in the app</small></span>
       ${ic('chevron')}
     </button>
     <button class="cell" data-action="strip-demo" type="button">
