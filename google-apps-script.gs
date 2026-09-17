@@ -13,7 +13,7 @@
 const SCRIPT_PIN = "PASTE_SHOP_PIN_HERE";
 const LICENSE_KEY = "PASTE_LICENSE_KEY_HERE";
 const LICENSE_URL = "PASTE_LICENSE_URL_HERE";
-const SCRIPT_VERSION = "2026-09-18-karigar-cols";
+const SCRIPT_VERSION = "2026-09-18-karigar-cols2";
 const LOCAL_TIMEZONE = "Asia/Kolkata";
 
 const HEADERS = {
@@ -270,12 +270,31 @@ function demoLedger_() {
   };
 }
 
+const DEMO_PARTY_NAMES = [
+  "Ramesh Karigar",
+  "Suresh Jewels",
+  "Mehta Silver House",
+  "Fatima Polishing Works",
+  "Gupta Casting Co",
+  "Kiran Chain Maker"
+];
+
 function isDemoId_(id) {
   return String(id || "").indexOf("demo-") === 0;
 }
 
+function isDemoRow_(row) {
+  if (!row) return false;
+  const id = String(row.id || "").trim();
+  const supplierId = String(row.supplierId || "").trim();
+  const name = String(row.name || row.supplierName || "").trim();
+  if (isDemoId_(id) || isDemoId_(supplierId)) return true;
+  if (DEMO_PARTY_NAMES.indexOf(name) !== -1 || DEMO_PARTY_NAMES.indexOf(id) !== -1) return true;
+  return false;
+}
+
 function dropDemoRows_(rows) {
-  return (rows || []).filter(function (row) { return !isDemoId_(row.id); });
+  return (rows || []).filter(function (row) { return !isDemoRow_(row); });
 }
 
 function seedDemoLedger_(opt) {
@@ -530,13 +549,19 @@ function writeObjectsAsRows_(name, records) {
   const headers = HEADERS[name];
   const sheet = getOrCreateSheet_(name);
   ensureHeaders_(sheet, headers);
-  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
-  const headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const width = Math.max(headerRow.length, headers.length);
+  const width = headers.length;
+  const lastCol = Math.max(sheet.getLastColumn(), width);
   const maxRows = sheet.getMaxRows();
-  if (maxRows > 1) sheet.getRange(2, 1, maxRows - 1, width).clearContent();
+  if (maxRows > 1) sheet.getRange(2, 1, maxRows - 1, lastCol).clearContent();
+  if (lastCol > width) sheet.getRange(1, width + 1, Math.max(maxRows, 1), lastCol - width).clearContent();
   if (!records.length) return;
-  const rows = recordsToAlignedRows_(headerRow, records, headers);
+  const rows = records.map(function (record) {
+    return headers.map(function (key) {
+      const value = record[key];
+      if (value === undefined || value === null) return "";
+      return String(value);
+    });
+  });
   sheet.getRange(2, 1, rows.length, width).setNumberFormat("@");
   sheet.getRange(2, 1, rows.length, width).setValues(rows);
 }

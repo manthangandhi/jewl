@@ -86,6 +86,26 @@ test('assertPartyName refuses a mobile number as the party name', async () => {
   assert.throws(() => assertPartyName('  '), /party name/);
 });
 
+test('a demo row is dropped even if a name was stored in the id column', async () => {
+  const { isDemoLedgerRow, stripDemoLedger } = await import('../pwa/sheet-model.js');
+  assert.equal(isDemoLedgerRow({ id: 'demo-ramesh', name: 'Ramesh Karigar' }), true);
+  assert.equal(isDemoLedgerRow({ id: 'Ramesh Karigar', name: '98200 11122' }), true);
+  assert.equal(isDemoLedgerRow({ id: 'x1', supplierName: 'Suresh Jewels' }), true);
+  assert.equal(isDemoLedgerRow({ id: 'live-1', name: 'Local Karigar' }), false);
+  const cleaned = stripDemoLedger({
+    suppliers: [
+      { id: 'Ramesh Karigar', name: '98200 11122' },
+      { id: 'live-1', name: 'Local Karigar' }
+    ],
+    money: [{ id: 'm1', supplierId: 'demo-ramesh', supplierName: 'Ramesh Karigar' }],
+    metal: [],
+    settlements: []
+  });
+  assert.equal(cleaned.suppliers.length, 1);
+  assert.equal(cleaned.suppliers[0].id, 'live-1');
+  assert.equal(cleaned.money.length, 0);
+});
+
 test('stripDemoLedger removes demo- rows and leaves live parties', async () => {
   const { stripDemoLedger, emptyLedger } = await import('../pwa/sheet-model.js');
   const live = emptyLedger();

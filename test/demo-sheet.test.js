@@ -18,7 +18,7 @@ test('sample khata lives in the bound Sheet script, not in the PWA', () => {
   assert.match(gs, /"Opening — old jobwork", 88\)/);
   assert.match(gs, /"Part settle \+ 20g", 1\)/);
   assert.doesNotMatch(model, /function buildDemoLedger/);
-  assert.doesNotMatch(model, /Ramesh Karigar/);
+  assert.doesNotMatch(model, /function demoLedger_/);
   assert.doesNotMatch(app, /buildDemoLedger/);
   assert.doesNotMatch(app, /replaceDemoLedger/);
   assert.doesNotMatch(app, /Ramesh Karigar/);
@@ -28,10 +28,24 @@ test('sample khata lives in the bound Sheet script, not in the PWA', () => {
 
 test('Sheet seed replaces demo- ids and keeps live parties and shop name', () => {
   assert.match(gs, /function dropDemoRows_/);
+  assert.match(gs, /function isDemoRow_/);
+  assert.match(gs, /DEMO_PARTY_NAMES/);
   assert.match(gs, /indexOf\("demo-"\) === 0/);
   assert.match(gs, /live\.concat\(demo\.suppliers\)/);
   assert.match(gs, /shopName \|\| demo\.shopName/);
   assert.doesNotMatch(gs, /function initLedger\(\)[\s\S]{0,400}seedDemoLedger_/);
+});
+
+test('demo objects use the same keys as Sheet headers, in the write order name-first id-last', () => {
+  const partyKeys = ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id'];
+  const moneyKeys = ['date', 'supplierName', 'type', 'amountInr', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'];
+  assert.match(gs, /Suppliers: \["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id"\]/);
+  assert.match(gs, /Money: \["date", "supplierName", "type", "amountInr", "note", "createdAt", "updatedAt", "supplierId", "id"\]/);
+  assert.match(gs, /return \{ id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s\.createdAt, updatedAt: s\.updatedAt \}/);
+  assert.match(gs, /return \{ id: id, supplierId: supplierId, supplierName: names\[supplierId\] \|\| "", type: type, amountInr: amount, note: note, date: s\.date, createdAt: s\.createdAt, updatedAt: s\.updatedAt \}/);
+  assert.match(gs, /headers\.map\(function \(key\) \{/);
+  for (const key of partyKeys) assert.match(gs, new RegExp(`"${key}"`));
+  for (const key of moneyKeys) assert.match(gs, new RegExp(`"${key}"`));
 });
 
 test('demo seed writes into the named header column, even if the live Sheet has id first', async () => {
@@ -59,7 +73,7 @@ test('demo seed writes into the named header column, even if the live Sheet has 
 test('Apps Script seed writes by header name and fills the Khata tab', () => {
   assert.match(gs, /function recordsToAlignedRows_/);
   assert.match(gs, /function writeObjectsAsRows_/);
-  assert.match(gs, /recordsToAlignedRows_\(headerRow, records, headers\)/);
+  assert.match(gs, /headers\.map\(function \(key\) \{/);
   assert.match(gs, /writeObjectsAsRows_\("Khata"/);
   assert.match(gs, /function buildKhataRows_/);
   assert.doesNotMatch(gs, /sheet\.getRange\(2, 1, rows\.length, headers\.length\)\.setValues\(rows\)/);

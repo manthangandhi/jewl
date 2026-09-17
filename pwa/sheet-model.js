@@ -216,8 +216,27 @@ export function splitDeal({ supplierId, type, amountInr, date, note, metals } = 
 }
 
 
+export const DEMO_PARTY_NAMES = [
+  'Ramesh Karigar',
+  'Suresh Jewels',
+  'Mehta Silver House',
+  'Fatima Polishing Works',
+  'Gupta Casting Co',
+  'Kiran Chain Maker'
+];
+
+export function isDemoLedgerRow(row) {
+  if (!row) return false;
+  const id = String(row.id || '').trim();
+  const supplierId = String(row.supplierId || '').trim();
+  const name = String(row.name || row.supplierName || '').trim();
+  if (id.startsWith('demo-') || supplierId.startsWith('demo-')) return true;
+  if (DEMO_PARTY_NAMES.includes(name) || DEMO_PARTY_NAMES.includes(id)) return true;
+  return false;
+}
+
 function dropDemoIdRows(list) {
-  return (list || []).filter((row) => !String(row?.id || '').startsWith('demo-'));
+  return (list || []).filter((row) => !isDemoLedgerRow(row));
 }
 
 export function stripDemoLedger(ledger) {
