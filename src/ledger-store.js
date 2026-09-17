@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { payableInr, metalByPurity, assertPurity } from './ledger-math.js';
+import { payableInr, metalByPurity, assertPurity, summarizeLedger } from './ledger-math.js';
 
 const LEDGER_KINDS = ['suppliers', 'money', 'metal', 'settlements'];
 const SUPPLIER_UPDATE_FIELDS = ['name', 'phone', 'notes', 'status'];
@@ -81,31 +81,11 @@ export class LedgerStore {
     };
   }
   summary(tenantId) {
-    const suppliers = this.list(tenantId, 'suppliers');
-    const money = this.list(tenantId, 'money');
-    const metal = this.list(tenantId, 'metal');
-    const settlements = this.list(tenantId, 'settlements');
-    const outstanding = suppliers.reduce((sum, s) => sum + payableInr(money, settlements, s.id), 0);
-    const totalPurchases = money.filter((r) => r.type === 'PURCHASE').reduce((sum, r) => sum + Number(r.amountInr || 0), 0);
-    const totalPayments = money.filter((r) => r.type === 'PAYMENT').reduce((sum, r) => sum + Number(r.amountInr || 0), 0);
-    const metalByPurityShop = {};
-    for (const s of suppliers) {
-      for (const [k, v] of Object.entries(metalByPurity(metal, settlements, s.id))) {
-        metalByPurityShop[k] = (metalByPurityShop[k] || 0) + v;
-      }
-    }
-    const nameById = Object.fromEntries(suppliers.map((s) => [s.id, s.name]));
-    const recentMoney = money.slice(0, 5).map((row) => ({ ...row, supplierName: nameById[row.supplierId] || '' }));
-    return {
-      supplierCount: suppliers.length,
-      moneyCount: money.length,
-      metalCount: metal.length,
-      settlementCount: settlements.length,
-      outstanding,
-      totalPurchases,
-      totalPayments,
-      metalByPurity: metalByPurityShop,
-      recentMoney
-    };
+    return summarizeLedger(
+      this.list(tenantId, 'suppliers'),
+      this.list(tenantId, 'money'),
+      this.list(tenantId, 'metal'),
+      this.list(tenantId, 'settlements')
+    );
   }
 }

@@ -12,6 +12,9 @@ test('owner app includes Google login and ledger views', () => {
     'data-view="settlements"',
     'api/me/export',
     'api/setup',
-    'LOCAL DEVELOPMENT MODE'
+    'LOCAL DEVELOPMENT MODE',
+    'docs.google.com/spreadsheets',
+    'We owe them',
+    'Metal with party'
   ]) assert.match(src, new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });

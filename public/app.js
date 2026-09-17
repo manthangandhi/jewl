@@ -63,10 +63,49 @@ function supplierSelect(selected) {
     `<option value="${esc(s.id)}" ${s.id === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`;
 }
 
+function moneyDirection(payable) {
+  if (Number(payable) > 0) return { label: 'We owe them', amount: Number(payable) };
+  if (Number(payable) < 0) return { label: 'They owe us', amount: -Number(payable) };
+  return { label: 'Square', amount: 0 };
+}
+
+function spreadsheetHref() {
+  const id = tenant()?.spreadsheetId;
+  return state.me?.spreadsheetUrl || (id ? `https://docs.google.com/spreadsheets/d/${id}` : '');
+}
+
+function ledgerBanner() {
+  const href = spreadsheetHref();
+  if (state.me?.localMode) {
+    return `<div class="notice">LOCAL DEVELOPMENT MODE — money and metal are stored in this server's <code>data/</code> folder, not Google Drive. Copy <code>.env.example</code> to <code>.env</code>, set Google client credentials and <code>TOKEN_ENCRYPTION_KEY</code>, restart, then use Continue with Google.</div>`;
+  }
+  if (href) {
+    return `<div class="notice ledger-ok">Ledger is in your Google Drive. <a href="${esc(href)}" target="_blank" rel="noopener">Open in Google Sheets</a></div>`;
+  }
+  return '<div class="notice">Google sign-in is on, but no spreadsheet id is stored yet. Retry setup if the sheet did not create.</div>';
+}
+
+function partyRows() {
+  return state.summary?.bySupplier || [];
+}
+
+function partyTable() {
+  const rows = partyRows();
+  if (!rows.length) return '<div class="empty">Add a supplier to see who we owe and who still holds metal.</div>';
+  return `<div class="list">${rows.map((row) => {
+    const dir = moneyDirection(row.payable);
+    return `<div class="row khata clickable" data-supplier="${esc(row.id)}">
+      <div><strong>${esc(row.name)}</strong><small>${esc(row.status || 'ACTIVE')}</small></div>
+      <div class="money"><small>${dir.label}</small>${money(dir.amount)}</div>
+      <div>${metalPills(row.metalByPurity)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 function landing() {
   const localForm = state.localMode === true ? `
     <div class="eyebrow" style="margin-top:28px">LOCAL DEVELOPMENT MODE</div>
-    <div class="notice">Data is currently saved only in this app's local <code>data/</code> folder when Google is not configured. It is not being sent to Google Sheets until Google OAuth is connected.</div>
+    <div class="notice">Google Sheets is not connected. This machine has no <code>GOOGLE_CLIENT_ID</code>, so rows stay in local <code>data/</code>. To use Drive: copy <code>.env.example</code> to <code>.env</code>, fill Google OAuth values, restart, then click Continue with Google.</div>
     <form id="onboard-form">
       <label>Business name<input name="businessName" placeholder="e.g. Mehta Jewellers" required></label>
       <label>Owner email (local profile)<input name="email" type="email" placeholder="owner@shop.com" required></label>
@@ -77,7 +116,7 @@ function landing() {
     <h1>Bring clarity to every gram.</h1>
     <p>Track suppliers, payments and metal balances in one calm workspace. Sign in with Google to keep the ledger in your Drive.</p>
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
-    <p style="margin-top:22px"><a class="btn btn-primary" href="/auth/google">Continue with Google</a></p>
+    <p style="margin-top:22px"><a class="${state.localMode ? 'btn btn-soft' : 'btn btn-primary'}" href="/auth/google">Continue with Google</a></p>
     ${localForm}
     <p><a href="/data-ownership">Read the planned Google data-ownership model</a></p>
   </section></main>`;
@@ -183,6 +222,8 @@ function render() {
       <div class="side-foot">Workspace<strong>${esc(t.businessName)}</strong>
         <span>${esc(state.me.user?.email || '')}</span>
         <span>${mode === 'FULL_ACCESS' ? 'Full access' : 'Read-only workspace'}</span>
+        <span>${state.me.localMode ? 'Ledger: local data/ folder' : (t.googleConnected ? 'Ledger: Google Sheets' : 'Ledger: not connected')}</span>
+        ${spreadsheetHref() ? `<p><a class="btn-plain" href="${esc(spreadsheetHref())}" target="_blank" rel="noopener">Open in Google Sheets</a></p>` : ''}
         <p><button class="btn-plain" data-action="logout" type="button">Log out</button></p>
       </div>
     </aside>
@@ -201,7 +242,7 @@ function viewContent(mode) {
     money: ['Money journal', 'Purchases and payments against suppliers.'],
     metal: ['Metal journal', 'Issues and receipts, kept separate by purity.'],
     settlements: ['Settlements', 'Simple close-outs of cash and metal.'],
-    reports: ['Reports', 'A simple pulse on your supplier operations.'],
+    reports: ['Party balances', 'Who we owe, who owes us, and metal still with each party.'],
     billing: ['Plan & billing', 'Your plan stays flexible as the business grows.']
   };
   const [title, sub] = titles[state.view] || titles.dashboard;
@@ -233,12 +274,20 @@ function dashboard() {
   const days = trialDaysLeft();
   const mode = modeOf();
   const recent = s.recentMoney || [];
-  return `<section class="grid stats">
-    <div class="card"><span class="stat-label">Outstanding balance</span><div class="stat-value">${money(s.outstanding)}</div><span class="stat-note">Across all suppliers</span></div>
-    <div class="card"><span class="stat-label">Total purchases</span><div class="stat-value">${money(s.totalPurchases)}</div><span class="stat-note">This workspace</span></div>
-    <div class="card"><span class="stat-label">Payments recorded</span><div class="stat-value">${money(s.totalPayments)}</div><span class="stat-note">Keep it moving</span></div>
-    <div class="card"><span class="stat-label">Active suppliers</span><div class="stat-value">${s.supplierCount || 0}</div><span class="stat-note">Relationships</span></div>
-  </section><br>
+  return `${ledgerBanner()}
+  <section class="grid stats">
+    <div class="card"><span class="stat-label">We owe them</span><div class="stat-value">${money(s.weOweInr ?? Math.max(0, s.outstanding))}</div><span class="stat-note">Hume dena — payable to parties</span></div>
+    <div class="card"><span class="stat-label">They owe us</span><div class="stat-value">${money(s.theyOweInr || 0)}</div><span class="stat-note">Unse lena — advances</span></div>
+    <div class="card"><span class="stat-label">Metal with parties</span><div class="stat-value">${Object.keys(s.metalByPurity || {}).length ? grams(Object.values(s.metalByPurity).reduce((n, v) => n + Number(v), 0)) : '0 g'}</div><span class="stat-note">Yet to return, by purity below</span></div>
+    <div class="card"><span class="stat-label">Active suppliers</span><div class="stat-value">${s.supplierCount || 0}</div><span class="stat-note">${days ? `${days} trial day${days === 1 ? '' : 's'} left` : esc(mode)}</span></div>
+  </section>
+  <p>${metalPills(s.metalByPurity)}</p>
+  <section class="card">
+    <div class="section-head"><h2>Party balances</h2><button class="btn-plain" data-view="reports">Full report</button></div>
+    <p>Money: we owe them, unless shown as they owe us. Metal with party: grams still with them by purity — this is “yet to return”.</p>
+    ${partyTable()}
+  </section>
+  <br>
   <section class="grid two">
     <div class="card">
       <div class="section-head"><h2>Recent money</h2><button class="btn-plain" data-view="money">View all</button></div>
@@ -254,15 +303,20 @@ function dashboard() {
 }
 
 function suppliers() {
+  const byId = Object.fromEntries(partyRows().map((row) => [row.id, row]));
   return `<section class="card">
     <div class="section-head"><h2>Supplier directory</h2><span class="pill">${state.suppliers.length} total</span></div>
-    ${state.suppliers.length ? `<div class="list">${state.suppliers.map((x) => `<div class="row clickable" data-supplier="${esc(x.id)}"><div><strong>${esc(x.name)}</strong><small>${esc(x.phone || 'No phone added')}</small></div><div class="money">${money(x.payable ?? payableFor(x.id))}</div><span class="pill">${esc(x.status || 'ACTIVE')}</span></div>`).join('')}</div>` : '<div class="empty">Your supplier relationships will appear here.</div>'}
+    ${state.suppliers.length ? `<div class="list">${state.suppliers.map((x) => {
+      const row = byId[x.id];
+      const dir = moneyDirection(row?.payable ?? x.payable ?? payableFor(x.id));
+      return `<div class="row khata clickable" data-supplier="${esc(x.id)}"><div><strong>${esc(x.name)}</strong><small>${esc(x.phone || 'No phone added')}</small></div><div class="money"><small>${dir.label}</small>${money(dir.amount)}</div><div>${metalPills(row?.metalByPurity)}</div></div>`;
+    }).join('')}</div>` : '<div class="empty">Your supplier relationships will appear here.</div>'}
   </section>`;
 }
 
 function metalPills(map) {
   const entries = Object.entries(map || {}).filter(([, v]) => Number(v) !== 0);
-  if (!entries.length) return '<p>No metal on this supplier.</p>';
+  if (!entries.length) return '<p>No metal with party.</p>';
   return `<div class="metal-pills">${entries.map(([key, v]) => `<span class="pill">${esc(key)} · ${grams(v)}</span>`).join('')}</div>`;
 }
 
@@ -272,8 +326,8 @@ function supplierDetail() {
   const write = canWrite();
   return `<section class="grid two">
     <div class="card">
-      <div class="section-head"><h2>Payable</h2><span class="pill">${esc(detail.supplier.status || 'ACTIVE')}</span></div>
-      <div class="stat-value">${money(detail.payable)}</div>
+      <div class="section-head"><h2>${moneyDirection(detail.payable).label}</h2><span class="pill">${esc(detail.supplier.status || 'ACTIVE')}</span></div>
+      <div class="stat-value">${money(moneyDirection(detail.payable).amount)}</div>
       <p>${esc(detail.supplier.phone || 'No phone')} ${detail.supplier.notes ? `· ${esc(detail.supplier.notes)}` : ''}</p>
       ${write ? `<div class="actions">
         <button class="btn btn-primary" data-action="modal" data-modal="purchase">Purchase</button>
@@ -284,14 +338,20 @@ function supplierDetail() {
       </div>` : ''}
     </div>
     <div class="card">
-      <div class="section-head"><h2>Metal by purity</h2></div>
+      <div class="section-head"><h2>Metal with party</h2></div>
       ${metalPills(detail.metalByPurity)}
+      <p>Positive grams are still with them (yet to return). 22K is never mixed with 18K.</p>
     </div>
   </section>
   <br>
   <section class="card">
     <div class="section-head"><h2>Recent money</h2></div>
     ${moneyRows(detail.money || [])}
+  </section>
+  <br>
+  <section class="card">
+    <div class="section-head"><h2>Metal movements</h2></div>
+    ${(detail.metal || []).length ? `<div class="list">${detail.metal.map((x) => `<div class="row"><div><strong>${esc(x.direction)}</strong><small>${esc(x.metalType)} ${esc(x.purity)} · ${fmtDate(x.date || x.createdAt)}</small></div><div class="money">${grams(x.weightGrams)}</div></div>`).join('')}</div>` : '<div class="empty">No metal entries yet.</div>'}
   </section>`;
 }
 
@@ -320,15 +380,22 @@ function settlementJournal() {
 
 function reports() {
   const s = state.summary || {};
-  const metalMap = s.metalByPurity || {};
-  return `<section class="grid two">
+  return `${ledgerBanner()}
+  <section class="card">
+    <div class="section-head"><h2>Party balances</h2><span class="pill">${partyRows().length} parties</span></div>
+    <p>Money: we owe them (hume dena), unless shown as they owe us (unse lena). Metal with party: grams still with them by purity — this is “yet to return / yet to provide metal.”</p>
+    ${partyTable()}
+  </section>
+  <br>
+  <section class="grid two">
     <div class="card">
       <div class="section-head"><h2>Cash movement</h2><span class="pill">All time</span></div>
       <p>Purchases recorded</p><div class="stat-value">${money(s.totalPurchases)}</div>
       <div class="bar"><span style="width:${s.totalPurchases ? Math.min(100, s.totalPurchases / (s.totalPurchases + s.totalPayments) * 100) : 0}%"></span></div>
       <p>Payments recorded</p><div class="stat-value">${money(s.totalPayments)}</div>
       <div class="bar"><span style="width:${s.totalPurchases ? Math.min(100, s.totalPayments / (s.totalPurchases + s.totalPayments) * 100) : 0}%;background:var(--green)"></span></div>
-      <p>Outstanding</p><div class="stat-value">${money(s.outstanding)}</div>
+      <p>We owe them</p><div class="stat-value">${money(s.weOweInr ?? 0)}</div>
+      <p>They owe us</p><div class="stat-value">${money(s.theyOweInr ?? 0)}</div>
     </div>
     <div class="card">
       <div class="section-head"><h2>Export</h2></div>
@@ -337,8 +404,8 @@ function reports() {
       <p><a class="btn btn-soft" href="/api/me/export?kind=money">Money CSV</a></p>
       <p><a class="btn btn-soft" href="/api/me/export?kind=metal">Metal CSV</a></p>
       <p><a class="btn btn-soft" href="/api/me/export?kind=settlements">Settlements CSV</a></p>
-      <div class="section-head" style="margin-top:22px"><h2>Shop metal</h2></div>
-      ${metalPills(metalMap)}
+      <div class="section-head" style="margin-top:22px"><h2>Metal with parties</h2></div>
+      ${metalPills(s.metalByPurity)}
     </div>
   </section>`;
 }

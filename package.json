@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node src/pwa-server.js",
+    "pwa": "node src/pwa-server.js",
+    "saas": "node src/server.js",
     "test": "node --test"
   }
 }

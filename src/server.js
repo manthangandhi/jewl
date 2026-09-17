@@ -247,7 +247,10 @@ export function createApp(deps = {}) {
       tenant,
       entitlements: featureEntitlements,
       localMode: !googleEnabled,
-      canWrite: tenant ? entitlements.canWrite(tenant.id) : false
+      canWrite: tenant ? entitlements.canWrite(tenant.id) : false,
+      spreadsheetUrl: tenant?.spreadsheetId
+        ? `https://docs.google.com/spreadsheets/d/${tenant.spreadsheetId}`
+        : null
     };
   }
 

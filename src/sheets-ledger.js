@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { payableInr, metalByPurity, assertPurity } from './ledger-math.js';
+import { payableInr, metalByPurity, assertPurity, summarizeLedger } from './ledger-math.js';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const LEDGER_KINDS = ['suppliers', 'money', 'metal', 'settlements'];
@@ -213,31 +213,11 @@ export class SheetsLedger {
   }
 
   async summary(tenantId) {
-    const suppliers = await this.list(tenantId, 'suppliers');
-    const money = await this.list(tenantId, 'money');
-    const metal = await this.list(tenantId, 'metal');
-    const settlements = await this.list(tenantId, 'settlements');
-    const outstanding = suppliers.reduce((sum, s) => sum + payableInr(money, settlements, s.id), 0);
-    const totalPurchases = money.filter((r) => r.type === 'PURCHASE').reduce((sum, r) => sum + Number(r.amountInr || 0), 0);
-    const totalPayments = money.filter((r) => r.type === 'PAYMENT').reduce((sum, r) => sum + Number(r.amountInr || 0), 0);
-    const metalByPurityShop = {};
-    for (const s of suppliers) {
-      for (const [k, v] of Object.entries(metalByPurity(metal, settlements, s.id))) {
-        metalByPurityShop[k] = (metalByPurityShop[k] || 0) + v;
-      }
-    }
-    const nameById = Object.fromEntries(suppliers.map((s) => [s.id, s.name]));
-    const recentMoney = money.slice(0, 5).map((row) => ({ ...row, supplierName: nameById[row.supplierId] || '' }));
-    return {
-      supplierCount: suppliers.length,
-      moneyCount: money.length,
-      metalCount: metal.length,
-      settlementCount: settlements.length,
-      outstanding,
-      totalPurchases,
-      totalPayments,
-      metalByPurity: metalByPurityShop,
-      recentMoney
-    };
+    return summarizeLedger(
+      await this.list(tenantId, 'suppliers'),
+      await this.list(tenantId, 'money'),
+      await this.list(tenantId, 'metal'),
+      await this.list(tenantId, 'settlements')
+    );
   }
 }

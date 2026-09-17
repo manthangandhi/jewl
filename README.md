@@ -1,12 +1,31 @@
 # Karigar
 
-Karigar is a jewellery shop workspace. The owner signs in with Google so supplier, money, metal, and settlement rows live in a spreadsheet the app creates in that owner’s Drive. When `GOOGLE_CLIENT_ID` is unset, the same UI falls back to a local workspace (JSON ledger) for development.
+Karigar is a jewellery supplier ledger for shop owners. The client app is a **PWA** (phone home screen) with the same architecture as [FluffyPens](https://github.com/manthangandhi/fluffy-content-vault): a static frontend, Google Apps Script as the API, and **Google Sheets as the only database**.
 
-## Run
+Every supplier, money, metal, and settlement row can be created, edited, and deleted. Party balances (we owe them / they owe us / metal with party) live on the home screen and on a `Balances` tab in the Sheet.
+
+## First client (Sheets PWA)
+
+```sh
+npm test
+npm run pwa
+```
+
+Open `http://localhost:3000`. Then create the spreadsheet and connect it using [SHEETS_SETUP.md](./SHEETS_SETUP.md).
+
+- **Live app (phone / laptop / tablet):** https://manthangandhi.github.io/jewl/
+- PWA files: `pwa/`
+- Apps Script: `pwa/google-apps-script.gs`
+- GitHub Pages deploys `pwa/` on push. Shop PIN and Sheet stay in the owner’s Google account; this URL is only the counter.
+
+On a phone: open the HTTPS link → browser menu → **Add to Home Screen**.
+
+## Node SaaS prototype (optional)
+
+The older Node workspace still runs for local JSON experiments. It is **not** the Sheets-backed client product.
 
 ```sh
 cp .env.example .env
-npm test
 npm start
 ```
 

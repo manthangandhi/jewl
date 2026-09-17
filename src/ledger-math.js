@@ -44,3 +44,45 @@ export function skipInvalidMetalRow(row) {
     return null;
   }
 }
+
+export function summarizeLedger(suppliers, money, metal, settlements) {
+  const bySupplier = suppliers.map((supplier) => {
+    const payable = payableInr(money, settlements, supplier.id);
+    return {
+      id: supplier.id,
+      name: supplier.name,
+      status: supplier.status || 'ACTIVE',
+      payable,
+      weOweInr: Math.max(0, payable),
+      theyOweInr: Math.max(0, -payable),
+      metalByPurity: metalByPurity(metal, settlements, supplier.id)
+    };
+  });
+  const outstanding = bySupplier.reduce((sum, row) => sum + row.payable, 0);
+  const weOweInr = bySupplier.reduce((sum, row) => sum + row.weOweInr, 0);
+  const theyOweInr = bySupplier.reduce((sum, row) => sum + row.theyOweInr, 0);
+  const totalPurchases = money.filter((row) => row.type === 'PURCHASE').reduce((sum, row) => sum + Number(row.amountInr || 0), 0);
+  const totalPayments = money.filter((row) => row.type === 'PAYMENT').reduce((sum, row) => sum + Number(row.amountInr || 0), 0);
+  const metalByPurityShop = {};
+  for (const row of bySupplier) {
+    for (const [key, grams] of Object.entries(row.metalByPurity)) {
+      metalByPurityShop[key] = (metalByPurityShop[key] || 0) + grams;
+    }
+  }
+  const nameById = Object.fromEntries(suppliers.map((supplier) => [supplier.id, supplier.name]));
+  const recentMoney = money.slice(0, 5).map((row) => ({ ...row, supplierName: nameById[row.supplierId] || '' }));
+  return {
+    supplierCount: suppliers.length,
+    moneyCount: money.length,
+    metalCount: metal.length,
+    settlementCount: settlements.length,
+    outstanding,
+    weOweInr,
+    theyOweInr,
+    totalPurchases,
+    totalPayments,
+    metalByPurity: metalByPurityShop,
+    recentMoney,
+    bySupplier
+  };
+}

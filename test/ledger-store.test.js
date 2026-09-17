@@ -88,3 +88,22 @@ test('add rejects unknown journal kinds', () => {
   assert.throws(() => ledger.add('t1', 'transactions', { amount: 1 }), /kind/);
 });
 
+test('summary lists party-wise payable and metal with the party', () => {
+  const ledger = new LedgerStore();
+  const a = ledger.addSupplier('t1', {
+    name: 'Karigar A',
+    openingMoney: 100,
+    openingMetal: [{ metalType: 'GOLD', purity: '22K', weightGrams: 10 }]
+  });
+  const b = ledger.addSupplier('t1', { name: 'Mehta', openingMoney: 50 });
+  ledger.add('t1', 'money', { supplierId: b.id, type: 'PAYMENT', amountInr: 80, date: '2026-01-04' });
+  const summary = ledger.summary('t1');
+  const rowA = summary.bySupplier.find((row) => row.id === a.id);
+  const rowB = summary.bySupplier.find((row) => row.id === b.id);
+  assert.equal(rowA.payable, 100);
+  assert.equal(rowA.metalByPurity['GOLD:22K'], 10);
+  assert.equal(rowB.payable, -30);
+  assert.equal(summary.weOweInr, 100);
+  assert.equal(summary.theyOweInr, 30);
+});
+

@@ -1,0 +1,50 @@
+name: Deploy Karigar PWA to GitHub Pages
+
+on:
+  push:
+    branches: [ main, feat/karigar-core-ledger ]
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Prepare site directory
+        run: |
+          rm -rf site || true
+          mkdir site
+          rsync -av --exclude='google-apps-script.gs' pwa/ site/
+          cp pwa/google-apps-script.gs site/google-apps-script.gs
+          touch site/.nojekyll
+          if [ -n "${{ secrets.APPS_SCRIPT_URL }}" ]; then
+            echo "${{ secrets.APPS_SCRIPT_URL }}" > site/apps-script-url.txt
+          else
+            echo "PASTE_YOUR_APPS_SCRIPT_URL_HERE" > site/apps-script-url.txt
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build-and-upload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

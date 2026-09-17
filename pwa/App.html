@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Karigar</title>
+  <style>
+    :root { --ink:#182321; --muted:#687572; --soft:#8a9894; --paper:#f4f6f2; --card:#fff; --line:rgba(24,35,33,.1); --green:#24594b; --mint:#dcece4; --danger:#a43b3b; --shadow:0 14px 32px rgba(23,59,51,.08); }
+    * { box-sizing:border-box; } html,body { height:100%; margin:0; color:var(--ink); background:#f4f6f2; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+    button,input,select,textarea { font:inherit; } button { cursor:pointer; border:0; background:none; }
+    .app { min-height:100svh; display:flex; flex-direction:column; padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
+    .topbar { position:sticky; top:0; z-index:20; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; background:#fff; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:8px; } .brand-mark { width:32px; height:32px; border-radius:10px; background:#173b33; color:#ec9a59; display:grid; place-items:center; font-weight:800; }
+    .brand-title { margin:0; font-size:15px; } .top-actions { display:flex; gap:6px; }
+    .icon-btn,.primary-btn,.ghost-btn,.danger-btn { min-height:36px; border-radius:12px; font-weight:700; font-size:12px; }
+    .icon-btn { width:36px; display:grid; place-items:center; border:1px solid var(--line); background:#fff; }
+    .icon-btn.primary { background:var(--green); color:#fff; border-color:var(--green); }
+    .primary-btn { background:var(--green); color:#fff; padding:0 14px; }
+    .ghost-btn { background:#fff; border:1px solid var(--line); padding:0 14px; }
+    .danger-btn { color:var(--danger); border:1px solid rgba(164,59,59,.22); background:#fff; padding:0 14px; }
+    .main { flex:1; padding:14px; max-width:980px; width:100%; margin:0 auto; }
+    .stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:var(--shadow); }
+    .stat-label { color:var(--soft); font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+    .stat-value { font-size:22px; font-weight:800; margin-top:6px; }
+    .stat-note { color:var(--muted); font-size:11px; margin-top:4px; }
+    .section-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:12px; }
+    h2 { margin:0; font-size:16px; } p { color:var(--muted); font-size:13px; }
+    .notice { padding:12px; border-radius:12px; background:#fff4e8; color:#985422; font-size:12px; margin-bottom:12px; }
+    .notice.ok { background:#e8f3ee; color:var(--green); }
+    .list { display:grid; gap:8px; }
+    .row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+    .row.clickable { cursor:pointer; } .row small { display:block; color:var(--muted); font-size:11px; margin-top:3px; }
+    .money { font-family:ui-monospace,monospace; font-size:12px; text-align:right; }
+    .pill { display:inline-flex; min-height:22px; padding:0 8px; border-radius:999px; background:var(--mint); color:var(--green); font-size:10px; font-weight:800; }
+    .metal-pills { display:flex; flex-wrap:wrap; gap:6px; } .empty { text-align:center; padding:28px 12px; color:var(--muted); }
+    .bottom-nav { position:fixed; left:0; right:0; bottom:0; display:grid; grid-template-columns:repeat(4,1fr); padding:6px 8px calc(8px + env(safe-area-inset-bottom)); background:#fff; border-top:1px solid var(--line); }
+    .bottom-nav button { padding:8px 4px; color:var(--muted); font-size:11px; font-weight:700; border-radius:10px; }
+    .bottom-nav button.active { color:var(--green); background:var(--mint); }
+    .scrim { position:fixed; inset:0; background:rgba(14,36,30,.45); z-index:40; }
+    .drawer { position:fixed; left:0; right:0; bottom:0; z-index:50; max-height:92svh; background:#fff; border-radius:22px 22px 0 0; display:flex; flex-direction:column; }
+    .drawer-head,.drawer-foot { padding:14px 16px; } .drawer-head { border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    .drawer-body { overflow:auto; padding:16px; display:grid; gap:12px; }
+    .drawer-foot { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--line); padding-bottom:calc(14px + env(safe-area-inset-bottom)); }
+    .drawer-foot .primary-btn { flex:1 1 100%; min-height:44px; } .drawer-foot .ghost-btn,.drawer-foot .danger-btn { flex:1; min-height:44px; }
+    label { display:grid; gap:6px; color:var(--muted); font-size:11px; font-weight:700; }
+    input,select,textarea { border:1px solid var(--line); border-radius:10px; padding:11px; }
+    .toast { position:fixed; left:50%; bottom:calc(88px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--green); color:#fff; padding:10px 16px; border-radius:999px; font-size:12px; font-weight:800; z-index:80; }
+    .add-menu { position:absolute; right:12px; top:56px; z-index:25; background:#fff; border:1px solid var(--line); border-radius:14px; min-width:200px; padding:6px; box-shadow:var(--shadow); }
+    .add-menu button { width:100%; text-align:left; padding:10px 12px; border-radius:10px; font-size:13px; font-weight:700; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+var GOLD = ['24K','22K','18K','14K'], SILVER = ['999','925'];
+function payableInr(moneyRows, settlementRows, supplierId) {
+  var money = moneyRows.filter(function(row){ return row.supplierId === supplierId; }).reduce(function(sum, row){
+    if (row.type === 'OPENING' || row.type === 'PURCHASE') return sum + Number(row.amountInr || 0);
+    if (row.type === 'PAYMENT') return sum - Number(row.amountInr || 0);
+    return sum;
+  }, 0);
+  var settled = settlementRows.filter(function(row){ return row.supplierId === supplierId; }).reduce(function(sum, row){ return sum + Number(row.moneyAmountInr || 0); }, 0);
+  return money - settled;
+}
+function metalByPurity(metalRows, settlementRows, supplierId) {
+  var balances = {};
+  function add(key, delta){ balances[key] = (balances[key] || 0) + delta; }
+  metalRows.filter(function(item){ return item.supplierId === supplierId; }).forEach(function(row){
+    var key = row.metalType + ':' + row.purity, grams = Number(row.weightGrams || 0);
+    if (row.direction === 'OPENING' || row.direction === 'ISSUE') add(key, grams);
+    if (row.direction === 'RECEIPT') add(key, -grams);
+  });
+  settlementRows.filter(function(item){ return item.supplierId === supplierId; }).forEach(function(row){
+    if (row.metalType && row.purity && Number(row.metalGrams || 0) > 0) add(row.metalType + ':' + row.purity, -Number(row.metalGrams));
+  });
+  var out = {}; Object.keys(balances).forEach(function(k){ if (balances[k] !== 0) out[k] = balances[k]; });
+  return out;
+}
+function summarizeLedger(suppliers, money, metal, settlements) {
+  var bySupplier = (suppliers || []).map(function(supplier){
+    var payable = payableInr(money || [], settlements || [], supplier.id);
+    return { id: supplier.id, name: supplier.name, status: supplier.status || 'ACTIVE', payable: payable, weOweInr: Math.max(0, payable), theyOweInr: Math.max(0, -payable), metalByPurity: metalByPurity(metal || [], settlements || [], supplier.id) };
+  });
+  return {
+    supplierCount: bySupplier.length,
+    weOweInr: bySupplier.reduce(function(s, r){ return s + r.weOweInr; }, 0),
+    theyOweInr: bySupplier.reduce(function(s, r){ return s + r.theyOweInr; }, 0),
+    metalByPurity: bySupplier.reduce(function(map, row){ Object.keys(row.metalByPurity).forEach(function(k){ map[k] = (map[k] || 0) + row.metalByPurity[k]; }); return map; }, {}),
+    bySupplier: bySupplier
+  };
+}
+function upsertById(list, record) {
+  var id = String(record.id || ''), next = (list || []).slice(), i = next.findIndex(function(row){ return String(row.id) === id; });
+  if (!id) return next;
+  if (i === -1) next.push(record); else next[i] = Object.assign({}, next[i], record);
+  return next;
+}
+function removeById(list, id) { id = String(id || ''); return (list || []).filter(function(row){ return String(row.id) !== id; }); }
+function deleteSupplierCascade(ledger, supplierId) {
+  var id = String(supplierId || '');
+  return { suppliers: removeById(ledger.suppliers, id), money: (ledger.money || []).filter(function(r){ return String(r.supplierId) !== id; }), metal: (ledger.metal || []).filter(function(r){ return String(r.supplierId) !== id; }), settlements: (ledger.settlements || []).filter(function(r){ return String(r.supplierId) !== id; }) };
+}
+function withNames(rows, suppliers) {
+  var names = {}; (suppliers || []).forEach(function(s){ names[s.id] = s.name; });
+  return (rows || []).map(function(row){ return Object.assign({}, row, { supplierName: names[row.supplierId] || row.supplierName || '' }); });
+}
+function moneyDir(p){ return Number(p) > 0 ? 'We owe them' : Number(p) < 0 ? 'They owe us' : 'Square'; }
+function formatMetal(map){ return Object.keys(map || {}).filter(function(k){ return Number(map[k]) !== 0; }).map(function(k){ return k + ' ' + map[k] + ' g'; }).join('; '); }
+function prepareSave(ledger) {
+  var now = new Date().toISOString(), summary = summarizeLedger(ledger.suppliers, ledger.money, ledger.metal, ledger.settlements);
+  return {
+    action: 'save',
+    meta: Object.assign({ schemaVersion: '1' }, ledger.meta || {}),
+    suppliers: ledger.suppliers || [],
+    money: withNames(ledger.money, ledger.suppliers),
+    metal: withNames(ledger.metal, ledger.suppliers),
+    settlements: withNames(ledger.settlements, ledger.suppliers),
+    balances: summary.bySupplier.map(function(row){ return { supplierId: row.id, supplierName: row.name, status: row.status, moneyDirection: moneyDir(row.payable), moneyInr: Math.abs(row.payable), metalWithParty: formatMetal(row.metalByPurity), weOweInr: row.weOweInr, theyOweInr: row.theyOweInr, updatedAt: now }; })
+  };
+}
+
+var root = document.getElementById('app');
+var state = { meta: { shopName: 'Karigar' }, suppliers: [], money: [], metal: [], settlements: [], spreadsheetUrl: '', view: 'parties', supplierId: null, drawer: null, editing: null, addOpen: false, saving: false, toast: '', error: '' };
+var toastTimer = null;
+function nid(){ return (crypto.randomUUID && crypto.randomUUID()) || ('id-' + Date.now() + '-' + Math.random().toString(16).slice(2)); }
+function today(){ return new Date().toISOString().slice(0, 10); }
+function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(x){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[x]; }); }
+function inr(v){ return 'INR ' + Number(v || 0).toLocaleString('en-IN'); }
+function grams(v){ return Number(v || 0).toLocaleString('en-IN') + ' g'; }
+function fmt(v){ if (!v) return ''; var d = new Date(v); return isNaN(d.getTime()) ? String(v).slice(0,10) : d.toLocaleDateString('en-IN'); }
+function sname(id){ var s = state.suppliers.filter(function(x){ return x.id === id; })[0]; return s ? s.name : ''; }
+function purities(type){ return type === 'SILVER' ? SILVER : GOLD; }
+function toast(msg){ state.toast = msg; render(); clearTimeout(toastTimer); toastTimer = setTimeout(function(){ state.toast = ''; render(); }, 2400); }
+
+function gasCall(payload) {
+  return new Promise(function(resolve, reject) {
+    if (!(google && google.script && google.script.run)) {
+      reject(new Error('Open this page from the Apps Script web app /exec URL, not from localhost.'));
+      return;
+    }
+    google.script.run.withSuccessHandler(function(data) {
+      if (!data || data.ok === false) reject(new Error((data && data.error) || 'Request failed'));
+      else resolve(data);
+    }).withFailureHandler(function(err) {
+      reject(err);
+    }).handleClient(payload);
+  });
+}
+
+function applyLoaded(data) {
+  state.meta = data.meta || state.meta;
+  state.suppliers = data.suppliers || [];
+  state.money = data.money || [];
+  state.metal = data.metal || [];
+  state.settlements = data.settlements || [];
+  state.spreadsheetUrl = data.spreadsheetUrl || '';
+  state.error = '';
+}
+
+async function boot() {
+  try {
+    await gasCall({ action: 'init' });
+    applyLoaded(await gasCall({ action: 'load' }));
+  } catch (err) {
+    state.error = String(err.message || err);
+  }
+  render();
+}
+
+async function persist() {
+  state.saving = true; render();
+  try {
+    var data = await gasCall(prepareSave(state));
+    state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl;
+    toast('Saved to Google Sheets');
+  } catch (err) {
+    toast(String(err.message || err));
+  }
+  state.saving = false; render();
+}
+
+function pills(map) {
+  var keys = Object.keys(map || {}).filter(function(k){ return Number(map[k]) !== 0; });
+  if (!keys.length) return '<span class="pill">No metal with party</span>';
+  return '<div class="metal-pills">' + keys.map(function(k){ return '<span class="pill">' + esc(k) + ' · ' + grams(map[k]) + '</span>'; }).join('') + '</div>';
+}
+function supplierSelect(selected) {
+  return '<label>Supplier<select name="supplierId" required>' + state.suppliers.map(function(s){ return '<option value="' + esc(s.id) + '"' + (s.id === selected ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select></label>';
+}
+function puritySelect(type, selected) {
+  return purities(type || 'GOLD').map(function(p){ return '<option value="' + p + '"' + (p === selected ? ' selected' : '') + '>' + p + '</option>'; }).join('');
+}
+function journal(kind, rows) {
+  if (!rows.length) return '<div class="empty">Nothing yet. Create a row, then tap it to edit or delete.</div>';
+  if (kind === 'money') return '<div class="list">' + rows.map(function(x){ return '<div class="row clickable" data-edit="money" data-id="' + esc(x.id) + '"><div><strong>' + esc(x.type) + '</strong><small>' + esc(sname(x.supplierId)) + ' · ' + esc(fmt(x.date)) + '</small></div><div class="money">' + inr(x.amountInr) + '</div></div>'; }).join('') + '</div>';
+  if (kind === 'metal') return '<div class="list">' + rows.map(function(x){ return '<div class="row clickable" data-edit="metal" data-id="' + esc(x.id) + '"><div><strong>' + esc(x.direction) + '</strong><small>' + esc(sname(x.supplierId)) + ' · ' + esc(x.metalType) + ' ' + esc(x.purity) + '</small></div><div class="money">' + grams(x.weightGrams) + '</div></div>'; }).join('') + '</div>';
+  return '<div class="list">' + rows.map(function(x){ return '<div class="row clickable" data-edit="settle" data-id="' + esc(x.id) + '"><div><strong>Settlement</strong><small>' + esc(sname(x.supplierId)) + ' · ' + esc(fmt(x.date)) + '</small></div><div class="money">' + inr(x.moneyAmountInr) + '</div></div>'; }).join('') + '</div>';
+}
+function partiesView() {
+  var s = summarizeLedger(state.suppliers, state.money, state.metal, state.settlements);
+  var banner = state.spreadsheetUrl ? '<div class="notice ok">Ledger is this Google Sheet. You can edit and delete every row.</div>' : '';
+  if (state.error) banner = '<div class="notice">' + esc(state.error) + '<br>Open this /exec link in Chrome Incognito with only one Google account. If Google says unverified: Advanced → Go to Karigar (unsafe) → Allow.</div>';
+  return banner + '<div class="stats"><div class="card"><span class="stat-label">We owe them</span><div class="stat-value">' + inr(s.weOweInr) + '</div><div class="stat-note">Hume dena</div></div><div class="card"><span class="stat-label">They owe us</span><div class="stat-value">' + inr(s.theyOweInr) + '</div><div class="stat-note">Unse lena</div></div><div class="card"><span class="stat-label">Parties</span><div class="stat-value">' + s.supplierCount + '</div></div><div class="card"><span class="stat-label">Metal with parties</span><div class="stat-value">' + grams(Object.keys(s.metalByPurity).reduce(function(n,k){ return n + Number(s.metalByPurity[k]); }, 0)) + '</div></div></div><section class="card"><div class="section-head"><h2>Party balances</h2><button class="ghost-btn" data-open="supplier">+ Supplier</button></div>' + (s.bySupplier.length ? '<div class="list">' + s.bySupplier.map(function(row){ return '<div class="row clickable" data-party="' + esc(row.id) + '"><div><strong>' + esc(row.name) + '</strong><small>' + esc(moneyDir(row.payable)) + '</small></div><div class="money">' + inr(Math.abs(row.payable)) + '<small>' + pills(row.metalByPurity) + '</small></div></div>'; }).join('') + '</div>' : '<div class="empty">Add a supplier. You can edit or delete later.</div>') + '</section>';
+}
+function partyView() {
+  var supplier = state.suppliers.filter(function(s){ return s.id === state.supplierId; })[0];
+  if (!supplier) return '<div class="empty">Not found</div>';
+  var row = summarizeLedger(state.suppliers, state.money, state.metal, state.settlements).bySupplier.filter(function(r){ return r.id === supplier.id; })[0] || { payable:0, metalByPurity:{} };
+  return '<section class="card"><div class="section-head"><h2>' + esc(supplier.name) + '</h2><button class="ghost-btn" data-edit="supplier" data-id="' + esc(supplier.id) + '">Edit</button></div><div class="stat-value">' + esc(moneyDir(row.payable)) + ' · ' + inr(Math.abs(row.payable)) + '</div>' + pills(row.metalByPurity) + '<p style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="primary-btn" data-open="money" data-supplier="' + esc(supplier.id) + '">Money</button><button class="ghost-btn" data-open="metal" data-supplier="' + esc(supplier.id) + '">Metal</button><button class="ghost-btn" data-open="settle" data-supplier="' + esc(supplier.id) + '">Settle</button></p></section><br><section class="card"><h2>Money</h2>' + journal('money', state.money.filter(function(x){ return x.supplierId === supplier.id; })) + '</section><br><section class="card"><h2>Metal</h2>' + journal('metal', state.metal.filter(function(x){ return x.supplierId === supplier.id; })) + '</section><br><section class="card"><h2>Settlements</h2>' + journal('settle', state.settlements.filter(function(x){ return x.supplierId === supplier.id; })) + '</section>';
+}
+function drawer() {
+  if (!state.drawer) return '';
+  var e = state.editing || {};
+  if (state.drawer === 'supplier') {
+    return '<div class="scrim" data-close></div><section class="drawer"><div class="drawer-head"><div><h2>' + (e.id ? 'Edit supplier' : 'New supplier') + '</h2></div><button class="icon-btn" data-close>✕</button></div><form id="edit-form" data-kind="supplier" class="drawer-body"><label>Name<input name="name" required value="' + esc(e.name || '') + '"></label><label>Phone<input name="phone" value="' + esc(e.phone || '') + '"></label><label>City<input name="city" value="' + esc(e.city || '') + '"></label><label>Notes<textarea name="notes" rows="2">' + esc(e.notes || '') + '</textarea></label>' + (e.id ? '' : '<label>Opening money (INR)<input name="openingMoney" type="number" min="0" step="0.01" value="0"></label>') + '</form><div class="drawer-foot">' + (e.id ? '<button class="danger-btn" data-delete="supplier">Delete</button>' : '') + '<button class="ghost-btn" data-close>Cancel</button><button class="primary-btn" form="edit-form">Save</button></div></section>';
+  }
+  if (state.drawer === 'money') {
+    return '<div class="scrim" data-close></div><section class="drawer"><div class="drawer-head"><div><h2>' + (e.id ? 'Edit money' : 'Record money') + '</h2></div><button class="icon-btn" data-close>✕</button></div><form id="edit-form" data-kind="money" class="drawer-body">' + supplierSelect(e.supplierId || state.supplierId) + '<label>Type<select name="type"><option value="OPENING"' + (e.type === 'OPENING' ? ' selected' : '') + '>Opening</option><option value="PURCHASE"' + (e.type !== 'PAYMENT' && e.type !== 'OPENING' ? ' selected' : '') + '>Purchase</option><option value="PAYMENT"' + (e.type === 'PAYMENT' ? ' selected' : '') + '>Payment</option></select></label><label>Amount (INR)<input name="amountInr" type="number" min="0.01" step="0.01" required value="' + esc(e.amountInr || '') + '"></label><label>Date<input name="date" type="date" required value="' + esc((e.date || today()).slice(0,10)) + '"></label><label>Note<input name="note" value="' + esc(e.note || '') + '"></label></form><div class="drawer-foot">' + (e.id ? '<button class="danger-btn" data-delete="money">Delete</button>' : '') + '<button class="ghost-btn" data-close>Cancel</button><button class="primary-btn" form="edit-form">Save</button></div></section>';
+  }
+  if (state.drawer === 'metal') {
+    return '<div class="scrim" data-close></div><section class="drawer"><div class="drawer-head"><div><h2>' + (e.id ? 'Edit metal' : 'Record metal') + '</h2></div><button class="icon-btn" data-close>✕</button></div><form id="edit-form" data-kind="metal" class="drawer-body">' + supplierSelect(e.supplierId || state.supplierId) + '<label>Direction<select name="direction"><option value="OPENING"' + (e.direction === 'OPENING' ? ' selected' : '') + '>Opening</option><option value="ISSUE"' + (e.direction !== 'RECEIPT' && e.direction !== 'OPENING' ? ' selected' : '') + '>Issue</option><option value="RECEIPT"' + (e.direction === 'RECEIPT' ? ' selected' : '') + '>Receipt</option></select></label><label>Metal<select name="metalType"><option value="GOLD">Gold</option><option value="SILVER"' + (e.metalType === 'SILVER' ? ' selected' : '') + '>Silver</option></select></label><label>Purity<select name="purity">' + puritySelect(e.metalType, e.purity || '22K') + '</select></label><label>Weight (grams)<input name="weightGrams" type="number" min="0.001" step="0.001" required value="' + esc(e.weightGrams || '') + '"></label><label>Date<input name="date" type="date" required value="' + esc((e.date || today()).slice(0,10)) + '"></label></form><div class="drawer-foot">' + (e.id ? '<button class="danger-btn" data-delete="metal">Delete</button>' : '') + '<button class="ghost-btn" data-close>Cancel</button><button class="primary-btn" form="edit-form">Save</button></div></section>';
+  }
+  return '<div class="scrim" data-close></div><section class="drawer"><div class="drawer-head"><div><h2>' + (e.id ? 'Edit settlement' : 'Record settlement') + '</h2></div><button class="icon-btn" data-close>✕</button></div><form id="edit-form" data-kind="settle" class="drawer-body">' + supplierSelect(e.supplierId || state.supplierId) + '<label>Cash closed (INR)<input name="moneyAmountInr" type="number" min="0" step="0.01" value="' + esc(e.moneyAmountInr || 0) + '"></label><label>Metal type<select name="metalType"><option value="">None</option><option value="GOLD"' + (e.metalType === 'GOLD' ? ' selected' : '') + '>Gold</option><option value="SILVER"' + (e.metalType === 'SILVER' ? ' selected' : '') + '>Silver</option></select></label><label>Purity<select name="purity">' + puritySelect(e.metalType, e.purity || '22K') + '</select></label><label>Metal closed (grams)<input name="metalGrams" type="number" min="0" step="0.001" value="' + esc(e.metalGrams || 0) + '"></label><label>Date<input name="date" type="date" required value="' + esc((e.date || today()).slice(0,10)) + '"></label></form><div class="drawer-foot">' + (e.id ? '<button class="danger-btn" data-delete="settle">Delete</button>' : '') + '<button class="ghost-btn" data-close>Cancel</button><button class="primary-btn" form="edit-form">Save</button></div></section>';
+}
+
+function render() {
+  var shop = (state.meta && state.meta.shopName) || 'Karigar';
+  function nav(id, label){ return '<button class="' + ((state.view === id || (id === 'parties' && state.view === 'party')) ? 'active' : '') + '" data-view="' + id + '">' + label + '</button>'; }
+  var body = state.view === 'party' ? partyView() : state.view === 'money' ? '<section class="card"><div class="section-head"><h2>Money</h2><button class="ghost-btn" data-open="money">+ Record</button></div>' + journal('money', state.money) + '</section>' : state.view === 'metal' ? '<section class="card"><div class="section-head"><h2>Metal</h2><button class="ghost-btn" data-open="metal">+ Record</button></div>' + journal('metal', state.metal) + '</section>' : state.view === 'settlements' ? '<section class="card"><div class="section-head"><h2>Settlements</h2><button class="ghost-btn" data-open="settle">+ Record</button></div>' + journal('settle', state.settlements) + '</section>' : partiesView();
+  root.innerHTML = '<div class="app"><header class="topbar"><div class="brand"><div class="brand-mark">K</div><h1 class="brand-title">' + esc(shop) + (state.saving ? ' · saving' : '') + '</h1></div><div class="top-actions"><button class="icon-btn primary" data-toggle-add>+</button></div>' + (state.addOpen ? '<div class="add-menu"><button data-open="supplier">Supplier</button><button data-open="money">Money</button><button data-open="metal">Metal</button><button data-open="settle">Settlement</button></div>' : '') + '</header><main class="main">' + body + '</main><nav class="bottom-nav">' + nav('parties','Parties') + nav('money','Money') + nav('metal','Metal') + nav('settlements','Settle') + '</nav>' + drawer() + (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : '') + '</div>';
+  bind();
+}
+
+function closeDrawer(){ state.drawer = null; state.editing = null; state.addOpen = false; render(); }
+function openDrawer(kind, supplierId) {
+  if ((kind === 'money' || kind === 'metal' || kind === 'settle') && !state.suppliers.length) { toast('Add a supplier first'); kind = 'supplier'; }
+  state.drawer = kind; state.editing = null; state.addOpen = false; if (supplierId) state.supplierId = supplierId; render();
+}
+function openEdit(kind, id) {
+  state.addOpen = false;
+  var list = kind === 'supplier' ? state.suppliers : kind === 'money' ? state.money : kind === 'metal' ? state.metal : state.settlements;
+  state.editing = list.filter(function(r){ return r.id === id; })[0] || null;
+  state.drawer = kind === 'settle' ? 'settle' : kind;
+  render();
+}
+function stamp(row, isNew){ var now = new Date().toISOString(); return Object.assign({}, row, { createdAt: isNew ? now : (row.createdAt || now), updatedAt: now }); }
+
+async function onSave(form) {
+  var data = Object.fromEntries(new FormData(form)), kind = form.getAttribute('data-kind'), isNew = !state.editing, id = (state.editing && state.editing.id) || nid();
+  if (kind === 'supplier') {
+    var row = stamp(Object.assign({}, state.editing || {}, { id: id, name: data.name.trim(), phone: data.phone || '', city: data.city || '', notes: data.notes || '', status: 'ACTIVE' }), isNew);
+    state.suppliers = upsertById(state.suppliers, row);
+    if (isNew && Number(data.openingMoney) > 0) state.money = upsertById(state.money, stamp({ id: nid(), supplierId: row.id, type: 'OPENING', amountInr: Number(data.openingMoney), date: today(), note: 'Opening' }, true));
+  } else if (kind === 'money') {
+    state.money = upsertById(state.money, stamp(Object.assign({}, state.editing || {}, { id: id, supplierId: data.supplierId, type: data.type, amountInr: Number(data.amountInr), date: data.date, note: data.note || '' }), isNew));
+  } else if (kind === 'metal') {
+    state.metal = upsertById(state.metal, stamp(Object.assign({}, state.editing || {}, { id: id, supplierId: data.supplierId, direction: data.direction, metalType: data.metalType, purity: data.purity, weightGrams: Number(data.weightGrams), date: data.date, note: '' }), isNew));
+  } else if (kind === 'settle') {
+    state.settlements = upsertById(state.settlements, stamp(Object.assign({}, state.editing || {}, { id: id, supplierId: data.supplierId, moneyAmountInr: Number(data.moneyAmountInr || 0), metalType: data.metalType || '', purity: data.metalType ? data.purity : '', metalGrams: Number(data.metalGrams || 0), date: data.date, note: '' }), isNew));
+  }
+  closeDrawer();
+  await persist();
+}
+
+async function onDelete(kind) {
+  var row = state.editing; if (!row) return;
+  if (kind === 'supplier') {
+    if (!confirm('Delete ' + row.name + ' and all of their money/metal/settlement rows?')) return;
+    var next = deleteSupplierCascade(state, row.id);
+    state.suppliers = next.suppliers; state.money = next.money; state.metal = next.metal; state.settlements = next.settlements;
+    state.view = 'parties'; state.supplierId = null;
+  } else if (kind === 'money') { if (!confirm('Delete this money row?')) return; state.money = removeById(state.money, row.id); }
+  else if (kind === 'metal') { if (!confirm('Delete this metal row?')) return; state.metal = removeById(state.metal, row.id); }
+  else { if (!confirm('Delete this settlement?')) return; state.settlements = removeById(state.settlements, row.id); }
+  closeDrawer();
+  await persist();
+}
+
+function bind() {
+  root.onclick = function(event) {
+    var t = event.target.closest('[data-view],[data-close],[data-open],[data-edit],[data-party],[data-toggle-add],[data-delete]');
+    if (!t) { if (state.addOpen) { state.addOpen = false; render(); } return; }
+    if (t.getAttribute('data-view')) { state.view = t.getAttribute('data-view'); if (state.view !== 'party') state.supplierId = null; state.addOpen = false; render(); return; }
+    if (t.getAttribute('data-party')) { state.view = 'party'; state.supplierId = t.getAttribute('data-party'); render(); return; }
+    if (t.hasAttribute('data-close')) return closeDrawer();
+    if (t.hasAttribute('data-toggle-add')) { state.addOpen = !state.addOpen; render(); return; }
+    if (t.getAttribute('data-open')) return openDrawer(t.getAttribute('data-open'), t.getAttribute('data-supplier'));
+    if (t.getAttribute('data-edit')) return openEdit(t.getAttribute('data-edit'), t.getAttribute('data-id'));
+    if (t.getAttribute('data-delete')) onDelete(t.getAttribute('data-delete'));
+  };
+  var form = root.querySelector('#edit-form');
+  if (form) form.onsubmit = function(event){ event.preventDefault(); onSave(form); };
+}
+
+render();
+boot();
+</script>
+</body>
+</html>
