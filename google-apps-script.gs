@@ -132,6 +132,7 @@ function doPost(e) {
     if (body.action === "init") return jsonOut_(initLedger());
     if (body.action === "load") return jsonOut_(loadLedger_());
     if (body.action === "save") return jsonOut_(saveLedger_(body));
+    if (body.action === "seedDemo") return jsonOut_(seedDemoLedger_({ force: Boolean(body.force) }));
     return jsonOut_(loadLedger_());
   } catch (err) {
     return jsonOut_({ ok: false, unlocked: false, error: String(err) });
@@ -149,12 +150,134 @@ function initLedger() {
   seedMetaIfEmpty_();
   hideUnusedDefaultSheet_();
   hideLegacyBalances_();
+  seedDemoLedger_({ force: false });
   return {
     ok: true,
     version: SCRIPT_VERSION,
     spreadsheetUrl: spreadsheetUrl_(),
     tabs: TAB_ORDER
   };
+}
+
+function seedDemo() {
+  return seedDemoLedger_({ force: false });
+}
+
+function seedDemoForce() {
+  return seedDemoLedger_({ force: true });
+}
+
+function isoDaysAgo_(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - Number(n || 0));
+  return Utilities.formatDate(d, LOCAL_TIMEZONE, "yyyy-MM-dd");
+}
+
+function demoStamp_(n) {
+  const date = isoDaysAgo_(n);
+  const ts = date + " 10:00:00";
+  return { date: date, createdAt: ts, updatedAt: ts };
+}
+
+function demoLedger_() {
+  const t = demoStamp_;
+  function party(id, name, phone, city, notes, ago) {
+    const s = t(ago);
+    return { id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+  function money(id, supplierId, type, amount, note, ago) {
+    const s = t(ago);
+    return { id: id, supplierId: supplierId, type: type, amountInr: amount, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+  function metal(id, supplierId, direction, metalType, purity, grams, note, ago) {
+    const s = t(ago);
+    return { id: id, supplierId: supplierId, direction: direction, metalType: metalType, purity: purity, weightGrams: grams, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+  function settle(id, supplierId, cash, metalType, purity, grams, note, ago) {
+    const s = t(ago);
+    return { id: id, supplierId: supplierId, moneyAmountInr: cash, metalType: metalType || "", purity: purity || "", metalGrams: grams || 0, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+  const now = t(0);
+  return {
+    shopName: "Mehta Jewellers",
+    suppliers: [
+      party("demo-ramesh", "Ramesh Karigar", "98200 11122", "Mumbai", "22K jobwork — Zaveri Bazaar", 90),
+      party("demo-suresh", "Suresh Jewels", "98765 44001", "Ahmedabad", "Wholesale gold supplier", 90),
+      party("demo-mehta", "Mehta Silver House", "90909 22110", "Rajkot", "Silver 999 / 925", 90),
+      party("demo-fatima", "Fatima Polishing Works", "99887 66554", "Surat", "Polishing — often takes advance", 90),
+      party("demo-gupta", "Gupta Casting Co", "98111 77882", "Jaipur", "18K casting", 90),
+      party("demo-kiran", "Kiran Chain Maker", "97654 33009", "Kolhapur", "Machine chain", 90)
+    ],
+    money: [
+      money("demo-m-r-op", "demo-ramesh", "OPENING", 185000, "Opening — old jobwork", 88),
+      money("demo-m-s-op", "demo-suresh", "OPENING", 210000, "Opening — gold supply", 88),
+      money("demo-m-f-op", "demo-fatima", "PAYMENT", 50000, "Advance for polishing", 85),
+      money("demo-m-k-op", "demo-kiran", "OPENING", 40000, "Opening", 84),
+      money("demo-m-s-p1", "demo-suresh", "PURCHASE", 450000, "22K kada lot", 80),
+      money("demo-m-r-p1", "demo-ramesh", "PURCHASE", 95000, "Finished sets received", 64),
+      money("demo-m-s-pay1", "demo-suresh", "PAYMENT", 200000, "RTGS part payment", 58),
+      money("demo-m-g-op", "demo-gupta", "OPENING", 72000, "Opening casting", 50),
+      money("demo-m-s-p2", "demo-suresh", "PURCHASE", 320000, "24K coin + bar", 40),
+      money("demo-m-r-pay1", "demo-ramesh", "PAYMENT", 50000, "Cash on counter", 36),
+      money("demo-m-m-p1", "demo-mehta", "PURCHASE", 68000, "Silver payal lot", 33),
+      money("demo-m-k-p1", "demo-kiran", "PURCHASE", 60000, "Chain labour + metal", 28),
+      money("demo-m-f-p1", "demo-fatima", "PURCHASE", 12000, "Polishing bill", 24),
+      money("demo-m-s-pay2", "demo-suresh", "PAYMENT", 150000, "UPI", 22),
+      money("demo-m-r-p2", "demo-ramesh", "PURCHASE", 120000, "Wedding set jobwork", 14),
+      money("demo-m-g-p1", "demo-gupta", "PURCHASE", 85000, "18K cast rings", 9),
+      money("demo-m-k-pay1", "demo-kiran", "PAYMENT", 70000, "Cleared chain bill", 8),
+      money("demo-m-r-pay2", "demo-ramesh", "PAYMENT", 80000, "Part payment", 7),
+      money("demo-m-m-p2", "demo-mehta", "PURCHASE", 42000, "925 jewellery", 3),
+      money("demo-m-f-p2", "demo-fatima", "PURCHASE", 8000, "Rhodium polish", 2)
+    ],
+    metal: [
+      metal("demo-t-r-op", "demo-ramesh", "OPENING", "GOLD", "22K", 120, "Metal with karigar", 88),
+      metal("demo-t-m-op", "demo-mehta", "OPENING", "SILVER", "999", 2000, "Silver with party", 86),
+      metal("demo-t-r-i1", "demo-ramesh", "ISSUE", "GOLD", "22K", 80, "Gave for bangles", 75),
+      metal("demo-t-g-i1", "demo-gupta", "ISSUE", "GOLD", "18K", 60, "Casting issue", 48),
+      metal("demo-t-m-i1", "demo-mehta", "ISSUE", "SILVER", "999", 500, "Gave for payal", 34),
+      metal("demo-t-r-i2", "demo-ramesh", "ISSUE", "GOLD", "22K", 40, "Gave for set", 21),
+      metal("demo-t-g-r1", "demo-gupta", "RECEIPT", "GOLD", "18K", 40, "Casting returned", 12),
+      metal("demo-t-r-r1", "demo-ramesh", "RECEIPT", "GOLD", "22K", 35, "Unused metal back", 6),
+      metal("demo-t-m-r1", "demo-mehta", "RECEIPT", "SILVER", "999", 200, "Scrap returned", 4)
+    ],
+    settlements: [
+      settle("demo-x-k1", "demo-kiran", 30000, "", "", 0, "Squared chain account", 5),
+      settle("demo-x-r1", "demo-ramesh", 40000, "GOLD", "22K", 20, "Part settle + 20g", 1)
+    ],
+    metalMaster: [
+      { id: "mm-gold-24k", metalType: "GOLD", purity: "24K", rateInrPerGram: 7800, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-gold-22k", metalType: "GOLD", purity: "22K", rateInrPerGram: 7200, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-gold-18k", metalType: "GOLD", purity: "18K", rateInrPerGram: 5900, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-gold-14k", metalType: "GOLD", purity: "14K", rateInrPerGram: 4600, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-silver-999", metalType: "SILVER", purity: "999", rateInrPerGram: 118, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-silver-925", metalType: "SILVER", purity: "925", rateInrPerGram: 108, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt }
+    ]
+  };
+}
+
+function seedDemoLedger_(opt) {
+  const force = opt && opt.force;
+  const existing = readRowsAsObjects_("Suppliers");
+  if (existing.length && !force) {
+    return { ok: true, seeded: false, reason: "already-has-parties", spreadsheetUrl: spreadsheetUrl_() };
+  }
+  const demo = demoLedger_();
+  const names = {};
+  demo.suppliers.forEach(function (s) { names[s.id] = s.name; });
+  function named(rows) {
+    return rows.map(function (row) {
+      row.supplierName = names[row.supplierId] || "";
+      return row;
+    });
+  }
+  writeMeta_({ shopName: demo.shopName || "Mehta Jewellers", schemaVersion: "1" });
+  writeObjectsAsRows_("Suppliers", demo.suppliers);
+  writeObjectsAsRows_("Money", named(demo.money));
+  writeObjectsAsRows_("Metal", named(demo.metal));
+  writeObjectsAsRows_("Settlements", named(demo.settlements));
+  writeObjectsAsRows_("MetalMaster", demo.metalMaster);
+  return { ok: true, seeded: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
 }
 
 function loadLedger_() {

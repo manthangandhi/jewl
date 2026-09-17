@@ -60,6 +60,37 @@ test('deleting a supplier also deletes that party journals', () => {
   assert.equal(next.settlements.length, 1);
 });
 
+test('demo ledger is a jewellery khata spanning about three months', async () => {
+  const { buildDemoLedger } = await import('../pwa/sheet-model.js');
+  const { summarizeLedger, reportForRange, rangeForPreset } = await import('../pwa/ledger-math.js');
+  const asOf = new Date(2026, 8, 17);
+  const ledger = buildDemoLedger(asOf);
+  assert.ok(ledger.suppliers.length >= 5);
+  assert.ok(ledger.suppliers.every((row) => row.name && row.city));
+  assert.ok(ledger.money.some((row) => row.type === 'OPENING'));
+  assert.ok(ledger.money.some((row) => row.type === 'PURCHASE'));
+  assert.ok(ledger.money.some((row) => row.type === 'PAYMENT'));
+  assert.ok(ledger.metal.some((row) => row.direction === 'ISSUE'));
+  assert.ok(ledger.metal.some((row) => row.direction === 'RECEIPT'));
+  assert.ok(ledger.settlements.length >= 1);
+  const dates = [...ledger.money, ...ledger.metal, ...ledger.settlements].map((row) => String(row.date).slice(0, 10)).sort();
+  assert.ok(dates[0] <= '2026-06-25');
+  assert.ok(dates[dates.length - 1] >= '2026-09-10');
+  const spanDays = (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000;
+  assert.ok(spanDays >= 80, `span ${spanDays}`);
+  const summary = summarizeLedger(ledger.suppliers, ledger.money, ledger.metal, ledger.settlements);
+  assert.ok(summary.bySupplier.some((row) => row.payable > 0), 'hume dena party');
+  assert.ok(summary.bySupplier.some((row) => row.payable < 0), 'unse lena party');
+  assert.ok(summary.bySupplier.some((row) => Object.keys(row.metalByPurity || {}).length > 0), 'metal with a party');
+  const month = reportForRange({ ...ledger, ...rangeForPreset('month', asOf) });
+  const all = reportForRange({ ...ledger, from: '', to: '' });
+  const week = reportForRange({ ...ledger, ...rangeForPreset('7d', asOf) });
+  assert.ok(all.purchases > month.purchases);
+  assert.ok(month.purchases > week.purchases);
+  assert.ok(all.count > month.count);
+  assert.ok(ledger.metalMaster.some((row) => row.rateInrPerGram > 0));
+});
+
 test('prepareSavePayload writes supplier names and party balances for the sheet', () => {
   const ledger = emptyLedger();
   ledger.suppliers = [{ id: 's1', name: 'Kiran', status: 'ACTIVE' }];

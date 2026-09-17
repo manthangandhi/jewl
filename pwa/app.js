@@ -1,6 +1,7 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
-  emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster
+  emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
+  buildDemoLedger, mergeDemoLedger
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot } from './session-cache.js';
@@ -227,6 +228,9 @@ async function refreshFromSheet() {
     applyLoaded(merged);
     writeCache();
     state.error = null;
+    if (!state.suppliers.length && !state.money.length) {
+      await seedDemoIntoSheet({ silent: true });
+    }
   } catch (error) {
     const msg = String(error.message || '');
     if (/wrong shop pin|does not unlock/i.test(msg)) {
@@ -241,6 +245,23 @@ async function refreshFromSheet() {
     state.syncing = false;
     if (state.unlocked) render();
   }
+}
+
+async function seedDemoIntoSheet({ silent } = {}) {
+  if (!silent && state.suppliers.length) {
+    if (!confirm('Add the 3-month sample khata to this Google Sheet? Existing parties stay. Sample rows use demo- ids.')) return;
+  }
+  const next = mergeDemoLedger(state, buildDemoLedger(new Date()));
+  state.suppliers = next.suppliers;
+  state.money = next.money;
+  state.metal = next.metal;
+  state.settlements = next.settlements;
+  state.metalMaster = next.metalMaster;
+  state.meta = next.meta;
+  if (!state.shopName) state.shopName = next.meta?.shopName || 'Mehta Jewellers';
+  refreshSummary();
+  await persist();
+  render();
 }
 
 async function persist() {
@@ -488,7 +509,8 @@ function partiesHome() {
   }).join('')}</div>
     </section>` : `<div class="empty-khata grow">
       <p>No parties yet</p>
-      <button class="btn btn-primary" data-action="modal" data-modal="supplier">Add party</button>
+      <button class="btn btn-primary" data-action="seed-demo" type="button">Seed 3-month sample into Sheet</button>
+      <button class="btn btn-soft" data-action="modal" data-modal="supplier">Add party</button>
     </div>`;
   return `
     <div class="desk-split fill">
@@ -629,6 +651,10 @@ function booksView() {
     </button>
     <button class="cell" data-view="masters" type="button">
       <span class="cell-main"><strong>Metal master</strong><small>Purity and optional rate</small></span>
+      ${ic('chevron')}
+    </button>
+    <button class="cell" data-action="seed-demo" type="button">
+      <span class="cell-main"><strong>Seed 3-month sample khata</strong><small>Writes demo parties and journals into this Google Sheet</small></span>
       ${ic('chevron')}
     </button>
     ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
@@ -907,6 +933,7 @@ function bind() {
       else if (action === 'logout') logout();
       else if (action === 'setup') { state.setupOpen = !state.setupOpen; state.gate = 'login'; landing(); }
       else if (action === 'refresh') await refreshFromSheet();
+      else if (action === 'seed-demo') await seedDemoIntoSheet();
       else if (action === 'gate') {
         state.gate = target.dataset.gate;
         state.error = null;
@@ -1179,7 +1206,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.getRegistrations()
     .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
     .then(() => caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))))
-    .then(() => navigator.serviceWorker.register('./service-worker.js?v=12'))
+    .then(() => navigator.serviceWorker.register('./service-worker.js?v=13'))
     .catch(() => {});
 }
 

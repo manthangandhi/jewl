@@ -20,6 +20,9 @@ test('Apps Script implements load, save, init and the same tabs as the PWA model
   assert.match(gs, /action === "load"/);
   assert.match(gs, /action === "save"/);
   assert.match(gs, /action === "init"/);
+  assert.match(gs, /action === "seedDemo"/);
+  assert.match(gs, /function seedDemo/);
+  assert.match(gs, /Ramesh Karigar/);
   assert.match(gs, /SCRIPT_PIN/);
   assert.match(gs, /SpreadsheetApp\.getActiveSpreadsheet/);
   assert.doesNotMatch(gs, /SpreadsheetApp\.openById/);
@@ -69,6 +72,8 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(js, /applyPinKey/);
   assert.match(js, /shouldHandlePinKeyboard/);
   assert.match(js, /desk-col/);
+  assert.match(js, /buildDemoLedger/);
+  assert.match(js, /data-action="seed-demo"/);
   assert.doesNotMatch(js, /rememberedPinOk/);
   assert.doesNotMatch(js, /data-view="dashboard"/);
   assert.match(css, /shop-nav/);
