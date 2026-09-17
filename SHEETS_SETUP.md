@@ -63,7 +63,7 @@ You should now see:
 | `Money` | Opening / purchase / payment, with supplier name on every row |
 | `Metal` | Opening / issue / receipt by gold 24K–14K and silver 999/925 |
 | `Settlements` | Cash and metal close-outs |
-| `Balances` | **Party khata report** — We owe them / They owe us / metal with party |
+| `Khata` | **Party khata report** — Hume dena / Unse lena / metal by purity |
 
 Header row is frozen and dark green. `Balances` and `Suppliers` get a filter. You can edit any cell in Sheets; the PWA also edits and deletes by row id.
 
@@ -114,15 +114,17 @@ To inject the URL for every device (FluffyPens pattern):
 
 ## Sheet columns (full)
 
-**Suppliers:** id, name, phone, city, notes, status, createdAt, updatedAt  
+**Suppliers:** name, phone, city, notes, status, createdAt, updatedAt, id  
 
-**Money:** id, date, supplierId, supplierName, type, amountInr, note, createdAt, updatedAt  
+**Money:** date, supplierName, type, amountInr, note, createdAt, updatedAt, supplierId, id  
 
-**Metal:** id, date, supplierId, supplierName, direction, metalType, purity, weightGrams, note, createdAt, updatedAt  
+**Metal:** date, supplierName, direction, metalType, purity, weightGrams, note, createdAt, updatedAt, supplierId, id  
 
-**Settlements:** id, date, supplierId, supplierName, moneyAmountInr, metalType, purity, metalGrams, note, createdAt, updatedAt  
+**Settlements:** date, supplierName, moneyAmountInr, metalType, purity, metalGrams, note, createdAt, updatedAt, supplierId, id  
 
-**Balances:** supplierId, supplierName, status, moneyDirection, moneyInr, metalWithParty, weOweInr, theyOweInr, updatedAt  
+**Khata:** supplierName, status, moneyDirection, moneyInr, gold24k, gold22k, gold18k, gold14k, silver999, silver925, weOweInr, theyOweInr, updatedAt, supplierId  
+
+Human columns first. Ids last. Dummy seed writes into the column whose header matches the field — it must not dump `name` into an `id` column.  
 
 Anyone with the web app URL can read and write this ledger. Keep the URL private to the shop.
 

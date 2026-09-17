@@ -12,6 +12,27 @@ export const HEADERS = {
   MetalMaster: ['metalType', 'purity', 'rateInrPerGram', 'status', 'createdAt', 'updatedAt', 'id']
 };
 
+/** Place each field under the sheet column whose header matches the key — never by array index. */
+export function recordsToAlignedRows(sheetHeaders, records, canonicalHeaders) {
+  const headers = (sheetHeaders || []).map((h) => String(h || '').trim());
+  const keys = canonicalHeaders || [];
+  const map = {};
+  headers.forEach((key, i) => {
+    if (key && map[key] === undefined) map[key] = i;
+  });
+  const width = Math.max(headers.length, 1);
+  return (records || []).map((record) => {
+    const row = Array(width).fill('');
+    keys.forEach((key) => {
+      const i = map[key];
+      if (i === undefined) return;
+      const value = record[key];
+      row[i] = value === undefined || value === null ? '' : String(value);
+    });
+    return row;
+  });
+}
+
 export function seedMetalMaster(rows) {
   if (Array.isArray(rows) && rows.length) return rows;
   const now = new Date().toISOString();

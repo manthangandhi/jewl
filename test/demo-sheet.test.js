@@ -34,6 +34,37 @@ test('Sheet seed replaces demo- ids and keeps live parties and shop name', () =>
   assert.doesNotMatch(gs, /function initLedger\(\)[\s\S]{0,400}seedDemoLedger_/);
 });
 
+test('demo seed writes into the named header column, even if the live Sheet has id first', async () => {
+  const { HEADERS, recordsToAlignedRows } = await import('../pwa/sheet-model.js');
+  const idFirst = ['id', 'name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt'];
+  const record = {
+    id: 'demo-ramesh',
+    name: 'Ramesh Karigar',
+    phone: '98200 11122',
+    city: 'Mumbai',
+    notes: '22K jobwork',
+    status: 'ACTIVE',
+    createdAt: '2026-06-20 10:00:00',
+    updatedAt: '2026-06-20 10:00:00'
+  };
+  const row = recordsToAlignedRows(idFirst, [record], HEADERS.Suppliers)[0];
+  assert.equal(row[idFirst.indexOf('id')], 'demo-ramesh');
+  assert.equal(row[idFirst.indexOf('name')], 'Ramesh Karigar');
+  assert.equal(row[idFirst.indexOf('phone')], '98200 11122');
+  assert.equal(row[idFirst.indexOf('city')], 'Mumbai');
+  assert.equal(row[idFirst.indexOf('notes')], '22K jobwork');
+  assert.notEqual(row[0], 'Ramesh Karigar');
+});
+
+test('Apps Script seed writes by header name and fills the Khata tab', () => {
+  assert.match(gs, /function recordsToAlignedRows_/);
+  assert.match(gs, /function writeObjectsAsRows_/);
+  assert.match(gs, /recordsToAlignedRows_\(headerRow, records, headers\)/);
+  assert.match(gs, /writeObjectsAsRows_\("Khata"/);
+  assert.match(gs, /function buildKhataRows_/);
+  assert.doesNotMatch(gs, /sheet\.getRange\(2, 1, rows\.length, headers\.length\)\.setValues\(rows\)/);
+});
+
 test('demo parties in the Sheet script are named people, not mobile numbers', () => {
   const expected = [
     'Ramesh Karigar',

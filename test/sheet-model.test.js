@@ -8,8 +8,27 @@ import {
   withSupplierNames,
   deleteSupplierCascade,
   buildBalancesRows,
-  prepareSavePayload
+  prepareSavePayload,
+  recordsToAlignedRows
 } from '../pwa/sheet-model.js';
+
+test('records land in the column whose header matches the field, not in array order', () => {
+  const idFirst = ['id', 'name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt'];
+  const row = recordsToAlignedRows(idFirst, [{
+    name: 'Ramesh Karigar',
+    phone: '98200 11122',
+    city: 'Mumbai',
+    notes: '22K jobwork',
+    status: 'ACTIVE',
+    createdAt: 't',
+    updatedAt: 't',
+    id: 'demo-ramesh'
+  }], HEADERS.Suppliers)[0];
+  assert.equal(row[0], 'demo-ramesh');
+  assert.equal(row[1], 'Ramesh Karigar');
+  assert.equal(row[2], '98200 11122');
+  assert.equal(row[3], 'Mumbai');
+});
 
 test('sheet tabs include a CA-readable Khata report with ids last', () => {
   assert.deepEqual(Object.keys(HEADERS), ['_Meta', 'Suppliers', 'Money', 'Metal', 'Settlements', 'Khata', 'MetalMaster']);

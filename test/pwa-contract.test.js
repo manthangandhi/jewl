@@ -7,7 +7,7 @@ import { HEADERS } from '../pwa/sheet-model.js';
 const pwa = path.join(process.cwd(), 'pwa');
 
 test('PWA shell files exist for installable Sheets app', () => {
-  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'App.html', 'appsscript.json']) {
+  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'App.html', 'appsscript.json']) {
     assert.equal(fs.existsSync(path.join(pwa, file)), true, file);
   }
   const html = fs.readFileSync(path.join(pwa, 'index.html'), 'utf8');

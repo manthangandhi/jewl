@@ -13,7 +13,7 @@
 const SCRIPT_PIN = "PASTE_SHOP_PIN_HERE";
 const LICENSE_KEY = "PASTE_LICENSE_KEY_HERE";
 const LICENSE_URL = "PASTE_LICENSE_URL_HERE";
-const SCRIPT_VERSION = "2026-09-09-karigar-bound";
+const SCRIPT_VERSION = "2026-09-18-karigar-cols";
 const LOCAL_TIMEZONE = "Asia/Kolkata";
 
 const HEADERS = {
@@ -290,22 +290,32 @@ function seedDemoLedger_(opt) {
   const existingMeta = metaObject_(readRowsAsObjects_("_Meta"));
   const shopName = String((existingMeta && existingMeta.shopName) || "").trim();
   writeMeta_({ shopName: shopName || demo.shopName || "", schemaVersion: "1" });
-  writeObjectsAsRows_("Suppliers", live.concat(demo.suppliers));
-  writeObjectsAsRows_("Money", dropDemoRows_(readRowsAsObjects_("Money")).concat(demo.money));
-  writeObjectsAsRows_("Metal", dropDemoRows_(readRowsAsObjects_("Metal")).concat(demo.metal));
-  writeObjectsAsRows_("Settlements", dropDemoRows_(readRowsAsObjects_("Settlements")).concat(demo.settlements));
+  const suppliers = live.concat(demo.suppliers);
+  const moneyRows = dropDemoRows_(readRowsAsObjects_("Money")).concat(demo.money);
+  const metalRows = dropDemoRows_(readRowsAsObjects_("Metal")).concat(demo.metal);
+  const settleRows = dropDemoRows_(readRowsAsObjects_("Settlements")).concat(demo.settlements);
+  writeObjectsAsRows_("Suppliers", suppliers);
+  writeObjectsAsRows_("Money", moneyRows);
+  writeObjectsAsRows_("Metal", metalRows);
+  writeObjectsAsRows_("Settlements", settleRows);
   const master = readRowsAsObjects_("MetalMaster");
   const byId = {};
   master.concat(demo.metalMaster).forEach(function (row) { if (row.id) byId[row.id] = row; });
   writeObjectsAsRows_("MetalMaster", Object.keys(byId).map(function (id) { return byId[id]; }));
+  writeObjectsAsRows_("Khata", buildKhataRows_(suppliers, moneyRows, metalRows, settleRows));
   return { ok: true, seeded: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
 }
 
 function clearDemoLedger_() {
-  writeObjectsAsRows_("Suppliers", dropDemoRows_(readRowsAsObjects_("Suppliers")));
-  writeObjectsAsRows_("Money", dropDemoRows_(readRowsAsObjects_("Money")));
-  writeObjectsAsRows_("Metal", dropDemoRows_(readRowsAsObjects_("Metal")));
-  writeObjectsAsRows_("Settlements", dropDemoRows_(readRowsAsObjects_("Settlements")));
+  const suppliers = dropDemoRows_(readRowsAsObjects_("Suppliers"));
+  const moneyRows = dropDemoRows_(readRowsAsObjects_("Money"));
+  const metalRows = dropDemoRows_(readRowsAsObjects_("Metal"));
+  const settleRows = dropDemoRows_(readRowsAsObjects_("Settlements"));
+  writeObjectsAsRows_("Suppliers", suppliers);
+  writeObjectsAsRows_("Money", moneyRows);
+  writeObjectsAsRows_("Metal", metalRows);
+  writeObjectsAsRows_("Settlements", settleRows);
+  writeObjectsAsRows_("Khata", buildKhataRows_(suppliers, moneyRows, metalRows, settleRows));
   return { ok: true, cleared: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
 }
 
@@ -368,28 +378,100 @@ function getOrCreateSheet_(name) {
   return sheet;
 }
 
+function headerIndexMap_(headerRow) {
+  const map = {};
+  (headerRow || []).forEach(function (h, i) {
+    const key = String(h || "").trim();
+    if (key && map[key] === undefined) map[key] = i;
+  });
+  return map;
+}
+
+function recordsToAlignedRows_(sheetHeaders, records, canonicalHeaders) {
+  const headers = (sheetHeaders || []).map(function (h) { return String(h || "").trim(); });
+  const map = headerIndexMap_(headers);
+  const width = Math.max(headers.length, 1);
+  return (records || []).map(function (record) {
+    const row = [];
+    let i;
+    for (i = 0; i < width; i++) row.push("");
+    (canonicalHeaders || []).forEach(function (key) {
+      const col = map[key];
+      if (col === undefined) return;
+      const value = record[key];
+      row[col] = value === undefined || value === null ? "" : String(value);
+    });
+    return row;
+  });
+}
+
+function metalKeyToKhata_(type, purity) {
+  const t = String(type || "").toUpperCase();
+  const p = String(purity || "");
+  if (t === "GOLD" && p === "24K") return "gold24k";
+  if (t === "GOLD" && p === "22K") return "gold22k";
+  if (t === "GOLD" && p === "18K") return "gold18k";
+  if (t === "GOLD" && p === "14K") return "gold14k";
+  if (t === "SILVER" && p === "999") return "silver999";
+  if (t === "SILVER" && p === "925") return "silver925";
+  return "";
+}
+
+function buildKhataRows_(suppliers, money, metal, settlements) {
+  const now = formatDateTime_(new Date());
+  return (suppliers || []).map(function (supplier) {
+    let payable = 0;
+    (money || []).forEach(function (row) {
+      if (row.supplierId !== supplier.id) return;
+      if (row.type === "OPENING" || row.type === "PURCHASE") payable += Number(row.amountInr || 0);
+      if (row.type === "PAYMENT") payable -= Number(row.amountInr || 0);
+    });
+    (settlements || []).forEach(function (row) {
+      if (row.supplierId !== supplier.id) return;
+      payable -= Number(row.moneyAmountInr || 0);
+    });
+    const grams = { gold24k: 0, gold22k: 0, gold18k: 0, gold14k: 0, silver999: 0, silver925: 0 };
+    (metal || []).forEach(function (row) {
+      if (row.supplierId !== supplier.id) return;
+      const field = metalKeyToKhata_(row.metalType, row.purity);
+      if (!field) return;
+      const w = Number(row.weightGrams || 0);
+      if (row.direction === "OPENING" || row.direction === "ISSUE") grams[field] += w;
+      if (row.direction === "RECEIPT") grams[field] -= w;
+    });
+    (settlements || []).forEach(function (row) {
+      if (row.supplierId !== supplier.id) return;
+      const field = metalKeyToKhata_(row.metalType, row.purity);
+      if (!field) return;
+      grams[field] -= Number(row.metalGrams || 0);
+    });
+    const dir = payable > 0 ? "Hume dena" : payable < 0 ? "Unse lena" : "Square";
+    return {
+      supplierName: supplier.name || "",
+      status: supplier.status || "ACTIVE",
+      moneyDirection: dir,
+      moneyInr: Math.abs(payable),
+      gold24k: grams.gold24k,
+      gold22k: grams.gold22k,
+      gold18k: grams.gold18k,
+      gold14k: grams.gold14k,
+      silver999: grams.silver999,
+      silver925: grams.silver925,
+      weOweInr: Math.max(0, payable),
+      theyOweInr: Math.max(0, -payable),
+      updatedAt: now,
+      supplierId: supplier.id
+    };
+  });
+}
+
 function ensureHeaders_(sheet, headers) {
   const lastCol = Math.max(sheet.getLastColumn(), headers.length);
-  if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    styleHeader_(sheet, headers.length);
-    return;
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (lastCol > headers.length) {
+    sheet.getRange(1, headers.length + 1, 1, lastCol - headers.length).clearContent();
   }
-  const existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
-    return String(h || "").trim();
-  });
-  const missing = headers.filter(function (h) {
-    return existing.indexOf(h) === -1;
-  });
-  if (existing[0] === "" && existing.filter(Boolean).length === 0) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    styleHeader_(sheet, headers.length);
-    return;
-  }
-  if (missing.length) {
-    sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
-  }
-  styleHeader_(sheet, Math.max(headers.length, sheet.getLastColumn()));
+  styleHeader_(sheet, headers.length);
 }
 
 function styleHeader_(sheet, width) {
@@ -448,19 +530,15 @@ function writeObjectsAsRows_(name, records) {
   const headers = HEADERS[name];
   const sheet = getOrCreateSheet_(name);
   ensureHeaders_(sheet, headers);
-  const width = Math.max(sheet.getLastColumn(), headers.length);
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const width = Math.max(headerRow.length, headers.length);
   const maxRows = sheet.getMaxRows();
   if (maxRows > 1) sheet.getRange(2, 1, maxRows - 1, width).clearContent();
   if (!records.length) return;
-  const rows = records.map(function (record) {
-    return headers.map(function (key) {
-      const value = record[key];
-      if (value === undefined || value === null) return "";
-      return String(value);
-    });
-  });
-  sheet.getRange(2, 1, rows.length, headers.length).setNumberFormat("@");
-  sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  const rows = recordsToAlignedRows_(headerRow, records, headers);
+  sheet.getRange(2, 1, rows.length, width).setNumberFormat("@");
+  sheet.getRange(2, 1, rows.length, width).setValues(rows);
 }
 
 function stringify_(value) {

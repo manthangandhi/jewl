@@ -7,6 +7,7 @@ import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreads
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
 import { admitUnlock, applyPinKey, shouldHandlePinKeyboard } from './shop-auth.js';
 import { resolveTourClick, applyTourNav } from './tour.js';
+import { buildPartyKhataDoc, partyKhataPrintHtml, printPartyKhataHtml, sharePartyKhataPdf } from './party-khata-print.js';
 
 const URL_KEY = 'karigar.appsScriptUrl';
 const CACHE_KEY = 'karigar.ledgerCache';
@@ -82,7 +83,9 @@ function ic(name) {
     chevron: '<path d="M9 6l6 6-6 6"/>',
     refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>',
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.8.4-1.4 1-1.4 1.7"/><path d="M12 17h.01"/>',
-    masters: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>'
+    masters: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+    print: '<path d="M6 9V3h12v6"/><rect x="6" y="14" width="12" height="7"/><path d="M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/>',
+    share: '<path d="M4 12v7h16v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v14"/>'
   };
   return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || ''}</svg>`;
 }
@@ -398,6 +401,32 @@ function downloadReport() {
   URL.revokeObjectURL(a.href);
 }
 
+function currentPartyKhataDoc() {
+  const detail = state.detail;
+  if (!detail?.supplier) throw new Error('Open a party to print their khata.');
+  return buildPartyKhataDoc({
+    shopName: state.shopName,
+    party: { ...detail.supplier, name: partyLabel(detail.supplier) },
+    payable: detail.payable,
+    metalByPurity: detail.metalByPurity,
+    passbook: detail.passbook
+  });
+}
+
+function printOpenPartyKhata() {
+  printPartyKhataHtml(partyKhataPrintHtml(currentPartyKhataDoc()));
+}
+
+async function shareOpenPartyKhata() {
+  try {
+    await sharePartyKhataPdf(currentPartyKhataDoc());
+  } catch (error) {
+    if (error && error.name === 'AbortError') return;
+    state.error = error.message || 'Could not share the party khata.';
+    render();
+  }
+}
+
 function isoStamp() {
   return today();
 }
@@ -425,7 +454,9 @@ function onboardShell(inner) {
 function gateChoice() {
   onboardShell(`
     <div class="brand"><span class="brand-mark">K</span> Karigar</div>
-    <h1>Party khata</h1>
+    <p class="eyebrow">Jewellery party khata</p>
+    <h1>Your Sheet.<br>This counter.</h1>
+    <p>Karigar, supplier, cash and metal — one name, one khata. Books stay in the shop’s Google Sheet.</p>
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
     <div class="choice-stack">
       <button type="button" class="choice-card" data-action="gate" data-gate="setup">
@@ -526,6 +557,7 @@ function loginScreen() {
   const dots = [0, 1, 2, 3].map((i) => `<span class="${digits[i] ? 'on' : ''}"></span>`).join('');
   onboardShell(`
     <div class="brand"><span class="brand-mark">K</span> Karigar</div>
+    <p class="eyebrow">Shop vault</p>
     <h1>Unlock</h1>
     ${configured ? '<p class="pin-hint">Type the shop PIN on the keyboard, or tap the pad.</p>' : '<p>Paste the shop /exec URL, then PIN.</p>'}
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
@@ -551,13 +583,46 @@ function loginScreen() {
   `);
 }
 
+function rateBoard() {
+  const rows = (state.metalMaster || []).filter((row) => String(row.status || 'ACTIVE') !== 'INACTIVE' && Number(row.rateInrPerGram) > 0);
+  if (!rows.length) return '';
+  return `<div class="rate-board" aria-label="Board rates">${rows.map((row) => (
+    `<div class="rate-chip"><em>${esc(row.metalType)} ${esc(row.purity)}</em><strong>${money(Number(row.rateInrPerGram))}/g</strong></div>`
+  )).join('')}</div>`;
+}
+
+function metalMasterGroups(rows) {
+  const rank = (t) => {
+    const u = String(t || '').toUpperCase();
+    if (u === 'GOLD') return 0;
+    if (u === 'SILVER') return 1;
+    return 2;
+  };
+  const map = new Map();
+  for (const row of rows || []) {
+    const key = row.metalType || 'OTHER';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return [...map.entries()].sort((a, b) => {
+    const d = rank(a[0]) - rank(b[0]);
+    return d !== 0 ? d : String(a[0]).localeCompare(String(b[0]));
+  });
+}
+
 function recordActions() {
   if (!state.suppliers.length) return '';
-  return `<div class="action-grid pass-actions" role="group" aria-label="Khata actions">
-    <button type="button" data-action="modal" data-modal="purchase"><span class="ag-ico">₹</span><span>Purchase</span></button>
-    <button type="button" data-action="modal" data-modal="payment"><span class="ag-ico">↓</span><span>Payment</span></button>
-    <button type="button" data-action="modal" data-modal="issue"><span class="ag-ico">→</span><span>Give metal</span></button>
-    <button type="button" data-action="modal" data-modal="receive"><span class="ag-ico">←</span><span>Get metal</span></button>
+  return `<div class="voucher-bar" role="group" aria-label="Khata actions">
+    <div class="voucher-col gave">
+      <p class="voucher-kicker">You gave</p>
+      <button type="button" data-action="modal" data-modal="purchase">Purchase</button>
+      <button type="button" data-action="modal" data-modal="issue">Give metal</button>
+    </div>
+    <div class="voucher-col got">
+      <p class="voucher-kicker">You got</p>
+      <button type="button" data-action="modal" data-modal="payment">Payment</button>
+      <button type="button" data-action="modal" data-modal="receive">Get metal</button>
+    </div>
   </div>`;
 }
 
@@ -641,7 +706,11 @@ function supplierPassbook() {
           ${detail.supplier.phone ? `<p class="party-phone">${esc(detail.supplier.phone)}</p>` : ''}
         </div>
       </div>
-      <button class="btn-plain" data-edit="supplier" data-id="${esc(detail.supplier.id)}" type="button">Edit</button>
+      <div class="party-tools">
+        <button class="btn-plain" data-action="print-party" type="button">${ic('print')}<span>Print</span></button>
+        <button class="btn btn-primary party-share" data-action="share-party" type="button">${ic('share')}<span>Share PDF</span></button>
+        <button class="btn-plain" data-edit="supplier" data-id="${esc(detail.supplier.id)}" type="button">Edit</button>
+      </div>
     </header>
     <section class="balance-hero tight">
       <div class="bh ${dir.tone}"><span>${dir.label || 'Square'}</span><strong>${money(dir.amount)}</strong></div>
@@ -653,9 +722,10 @@ function supplierPassbook() {
       <div class="list-head"><span>Running hisab</span></div>
       ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
         <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
+          <time class="pass-date">${esc(fmtDate(line.date))}</time>
           <span class="cell-main">
             <strong>${esc(line.label)}</strong>
-            <small>${fmtDate(line.date)}${line.detail ? ` · ${esc(line.detail)}` : ''}${line.note ? ` · ${esc(line.note)}` : ''}</small>
+            <small>${line.detail ? `${esc(line.detail)}` : ''}${line.note ? `${line.detail ? ' · ' : ''}${esc(line.note)}` : ''}</small>
           </span>
           <span class="cell-trail">
             <b class="${line.amountInr < 0 ? 'collect' : line.amountInr > 0 ? 'owe' : ''}">${line.kind === 'metal' ? grams(line.grams) : money(Math.abs(line.amountInr))}${line.kind === 'settle' && line.grams ? ` · ${grams(line.grams)}` : ''}</b>
@@ -669,23 +739,46 @@ function supplierPassbook() {
 function reportView() {
   const range = currentReportRange();
   const report = currentReport();
+  const custom = state.reportPreset === 'custom';
   const presets = [
     ['today', 'Today'],
-    ['7d', '7 days'],
-    ['30d', '30 days'],
+    ['7d', '7d'],
+    ['30d', '30d'],
     ['month', 'Month'],
     ['all', 'All'],
     ['custom', 'Custom']
   ];
+  const activity = report.lines.length ? `<ol class="passbook-list">${report.lines.map((line) => `
+          <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
+            <span class="cell-main"><strong>${esc(line.label)}</strong><small>${esc(line.name)} · ${fmtDate(line.date)}</small></span>
+            <span class="cell-trail"><b>${line.kind === 'metal' ? grams(line.fig) : money(line.fig)}</b></span>
+          </li>`).join('')}</ol>` : '<div class="empty-in">No entries in this period</div>';
+  const byParty = report.byParty.length ? `<div class="report-party-cards">${report.byParty.map((row) => `
+          <button type="button" class="party-report-card" data-supplier="${esc(row.id)}">
+            <strong class="party-name">${esc(row.name)}</strong>
+            <div class="mini-stats">
+              <div><span>Purchases</span><strong>${money(row.purchases)}</strong></div>
+              <div><span>Payments</span><strong>${money(row.payments)}</strong></div>
+              <div><span>Metal out</span><strong>${grams(row.metalOut)}</strong></div>
+              <div><span>Metal in</span><strong>${grams(row.metalIn)}</strong></div>
+            </div>
+          </button>`).join('')}</div>
+        <div class="data-table report-party-table">
+          <div class="th"><span>Party</span><span>Purchases</span><span>Payments</span><span>Metal out</span><span>Metal in</span></div>
+          ${report.byParty.map((row) => `<button type="button" class="tr" data-supplier="${esc(row.id)}">
+            <span>${esc(row.name)}</span><span>${money(row.purchases)}</span><span>${money(row.payments)}</span><span>${grams(row.metalOut)}</span><span>${grams(row.metalIn)}</span>
+          </button>`).join('')}
+        </div>` : '<div class="empty-in">No party activity in this period</div>';
   return `
+    <div class="report-page fill">
     <div class="report-toolbar">
-      <div class="chips wrap">
+      <div class="chips report-presets">
         ${presets.map(([id, label]) => `<button type="button" class="chip ${state.reportPreset === id ? 'on' : ''}" data-action="preset" data-preset="${id}">${label}</button>`).join('')}
       </div>
-      <div class="range-fields">
+      ${custom ? `<div class="range-fields">
         <label>From<input type="date" data-range="reportFrom" value="${esc(range.from)}"></label>
         <label>To<input type="date" data-range="reportTo" value="${esc(range.to)}"></label>
-      </div>
+      </div>` : ''}
       <div class="report-tools">
         <button type="button" class="btn btn-soft" data-action="export-report">Export CSV</button>
         <button type="button" class="btn btn-primary" data-action="print-report">Print</button>
@@ -694,29 +787,21 @@ function reportView() {
     <section class="metric-grid">
       <div class="metric"><span>Purchases</span><strong>${money(report.purchases)}</strong></div>
       <div class="metric"><span>Payments</span><strong>${money(report.payments)}</strong></div>
-      <div class="metric"><span>Settled</span><strong>${money(report.settled)}</strong></div>
       <div class="metric"><span>Metal out</span><strong>${grams(report.metalOut)}</strong></div>
       <div class="metric"><span>Metal in</span><strong>${grams(report.metalIn)}</strong></div>
+      <div class="metric"><span>Settled</span><strong>${money(report.settled)}</strong></div>
       <div class="metric"><span>Entries</span><strong>${report.count}</strong></div>
     </section>
-    <div class="desk-split fill">
+    <div class="desk-split fill report-desk">
       <section class="list-card grow">
         <div class="list-head"><span>By party</span></div>
-        ${report.byParty.length ? `<div class="data-table">
-          <div class="th"><span>Party</span><span>Purchases</span><span>Payments</span><span>Metal out</span><span>Metal in</span></div>
-          ${report.byParty.map((row) => `<button type="button" class="tr" data-supplier="${esc(row.id)}">
-            <span>${esc(row.name)}</span><span>${money(row.purchases)}</span><span>${money(row.payments)}</span><span>${grams(row.metalOut)}</span><span>${grams(row.metalIn)}</span>
-          </button>`).join('')}
-        </div>` : '<div class="empty-in">No party activity in this period</div>'}
+        ${byParty}
       </section>
-      <section class="list-card grow">
+      <section class="list-card grow report-activity">
         <div class="list-head"><span>Activity</span><span>${report.lines.length}</span></div>
-        ${report.lines.length ? `<ol class="passbook-list">${report.lines.map((line) => `
-          <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
-            <span class="cell-main"><strong>${esc(line.label)}</strong><small>${esc(line.name)} · ${fmtDate(line.date)}</small></span>
-            <span class="cell-trail"><b>${line.kind === 'metal' ? grams(line.fig) : money(line.fig)}</b></span>
-          </li>`).join('')}</ol>` : '<div class="empty-in">No entries in this period</div>'}
+        ${activity}
       </section>
+    </div>
     </div>`;
 }
 
@@ -755,14 +840,19 @@ function helpView() {
         <p>Close cash and/or metal against the khata.</p>
       </article>
       <article class="help-item">
+        <h2>Print / Share PDF</h2>
+        <p class="help-lead">Send this party’s khata, not the whole shop.</p>
+        <p>Open the party. Print for paper or Save as PDF. Share PDF sends the same hisab on WhatsApp when the phone allows file share.</p>
+      </article>
+      <article class="help-item">
         <h2>Refresh data</h2>
         <p class="help-lead">Header Refresh pulls the Sheet. You stay unlocked.</p>
         <p>The browser refresh button will ask for PIN again on this tab.</p>
       </article>
       <article class="help-item">
         <h2>Masters</h2>
-        <p class="help-lead">Metals and purities you actually use.</p>
-        <p>Purchase and Give / Get metal then offer those in the dropdowns.</p>
+        <p class="help-lead">Purities you use. Board rate is optional.</p>
+        <p>These appear on Purchase and Give / Get metal. If you enter ₹ per gram, GOLD 22K etc. show under the header like the shop rate board. Empty rates stay off the header — they are not a second khata.</p>
       </article>
       <article class="help-item">
         <h2>Demo khata</h2>
@@ -792,39 +882,43 @@ function tourOverlay() {
 
 function booksView() {
   return `<section class="sheet-page">
-    <section class="settings-list">
-      <button class="cell" data-view="masters" type="button">
-        <span class="cell-main"><strong>Metal master</strong><small>Purity and optional rate</small></span>
-        ${ic('chevron')}
-      </button>
-    </section>
-    <p class="sheet-kicker">Sheet</p>
-    <section class="settings-list sheet-secondary">
-      <button class="cell" data-action="refresh" type="button">
-        <span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : '<small>Reload the Google Sheet. Header Refresh does the same.</small>'}</span>
-        ${ic('chevron')}
-      </button>
-      ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
-        <span class="cell-main"><strong>Open in Google Sheets</strong><small>View the live workbook</small></span>
-        ${ic('chevron')}
-      </a>` : ''}
-    </section>
-    <p class="sheet-kicker demo">Demo only — not live books</p>
-    <section class="settings-list sheet-demo">
-      <button class="cell" data-action="seed-demo" type="button">
-        <span class="cell-main"><strong>Load demo khata</strong><small>Writes sample parties into this Google Sheet — not stored in the app</small></span>
-        ${ic('chevron')}
-      </button>
-      <button class="cell" data-action="strip-demo" type="button">
-        <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes demo- parties and their sample journals</small></span>
-        ${ic('chevron')}
-      </button>
-    </section>
-    <section class="settings-list">
-      <button class="cell danger" data-action="logout" type="button">
-        <span class="cell-main"><strong>Lock</strong></span>
-      </button>
-    </section>
+    <div class="sheet-desk">
+      <div class="sheet-main">
+        <section class="list-card">
+          <div class="list-head"><span>This shop</span></div>
+          <button class="cell" data-view="masters" type="button">
+            <span class="cell-main"><strong>Metal master</strong><small>Purity and optional board rate</small></span>
+            ${ic('chevron')}
+          </button>
+          <button class="cell danger" data-action="logout" type="button">
+            <span class="cell-main"><strong>Lock</strong><small>PIN lock this device</small></span>
+          </button>
+        </section>
+        <section class="list-card">
+          <div class="list-head"><span>Google Sheet</span></div>
+          <button class="cell" data-action="refresh" type="button">
+            <span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : '<small>Reload the Google Sheet. Header Refresh does the same.</small>'}</span>
+            ${ic('chevron')}
+          </button>
+          ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
+            <span class="cell-main"><strong>Open in Google Sheets</strong><small>View the live workbook</small></span>
+            ${ic('chevron')}
+          </a>` : ''}
+        </section>
+      </div>
+      <section class="list-card sheet-demo">
+        <div class="list-head"><span>Demo only</span></div>
+        <p class="sheet-warn">Writes into the Sheet, not the app. Do not use on live books.</p>
+        <button class="cell" data-action="seed-demo" type="button">
+          <span class="cell-main"><strong>Load demo khata</strong><small>Sample parties and journals into this Google Sheet</small></span>
+          ${ic('chevron')}
+        </button>
+        <button class="cell" data-action="strip-demo" type="button">
+          <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes demo- parties and their sample journals</small></span>
+          ${ic('chevron')}
+        </button>
+      </section>
+    </div>
   </section>`;
 }
 
@@ -840,7 +934,7 @@ function viewContent() {
 
 function viewTitle() {
   if (state.view === 'report' || state.view === 'today') return 'Report';
-  if (state.view === 'masters') return 'Masters';
+  if (state.view === 'masters') return 'Metal master';
   if (state.view === 'books') return 'Sheet';
   if (state.view === 'help') return 'How this works';
   if (state.view === 'supplier') return '';
@@ -858,10 +952,10 @@ function render() {
   root.innerHTML = `<div class="shop">
     <aside class="shop-nav" aria-label="Shop">
       <div class="nav-brand"><span class="brand-mark">K</span> <span>Karigar</span></div>
-      <button class="nav-item ${navParties}" data-view="parties" type="button">${ic('parties')}<span>Parties</span></button>
-      <button class="nav-item ${navToday}" data-view="report" type="button">${ic('report')}<span>Report</span></button>
+      <button class="nav-item nav-core ${navParties}" data-view="parties" type="button">${ic('parties')}<span>Parties</span></button>
+      <button class="nav-item nav-core ${navToday}" data-view="report" type="button">${ic('today')}<span class="nav-phone">Today</span><span class="nav-desk">Report</span></button>
       <button class="nav-item ${navMasters}" data-view="masters" type="button">${ic('masters')}<span>Masters</span></button>
-      <button class="nav-item ${navBooks}" data-view="books" type="button">${ic('sheet')}<span>Sheet</span></button>
+      <button class="nav-item nav-core ${navBooks}" data-view="books" type="button">${ic('sheet')}<span>Sheet</span></button>
       <button class="nav-item ${navHelp}" data-view="help" type="button">${ic('help')}<span>How to</span></button>
       <button class="nav-item nav-lock" data-action="logout" type="button">${ic('lock')}<span>Lock</span></button>
     </aside>
@@ -878,6 +972,7 @@ function render() {
           <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock">${ic('lock')}</button>
         </div>
       </header>
+      ${rateBoard()}
       <main class="stage">
         ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
         ${viewContent()}
@@ -1050,7 +1145,7 @@ function metalMasterModal() {
     <form id="data-form" data-kind="metalMaster">
       <label>Metal type<input name="metalType" required value="${esc(e.metalType || 'GOLD')}" placeholder="GOLD / SILVER"></label>
       <label>Purity<input name="purity" required value="${esc(e.purity || '')}" placeholder="22K / 999"></label>
-      <label>Rate ₹ / gram<input name="rateInrPerGram" type="number" min="0" step="0.01" value="${esc(e.rateInrPerGram || '')}" placeholder="Optional"></label>
+      <label>Board rate ₹ / gram (optional)<input name="rateInrPerGram" type="number" min="0" step="0.01" value="${esc(e.rateInrPerGram || '')}" placeholder="Blank = not on the header board"></label>
       <label>Status<select name="status">
         <option value="ACTIVE" ${e.status !== 'INACTIVE' ? 'selected' : ''}>Active</option>
         <option value="INACTIVE" ${e.status === 'INACTIVE' ? 'selected' : ''}>Inactive</option>
@@ -1066,23 +1161,33 @@ function metalMasterModal() {
 
 function mastersView() {
   const rows = state.metalMaster || [];
+  const groups = metalMasterGroups(rows);
   return `
-    <div class="filter-row">
-      <p class="lede">Metal used when you give / get / settle. Rate is optional (₹ per gram).</p>
+    <div class="desk-col fill masters-page">
+    <div class="page-head">
+      <p class="lede">Board rate is optional. When you enter ₹/g, it appears under the header like a shop rate board.</p>
       <button class="btn btn-primary" data-action="modal" data-modal="metalMaster" type="button">+ Metal</button>
     </div>
-    <section class="list-card grow">
-      <div class="data-table master-table">
-        <div class="th"><span>Metal</span><span>Purity</span><span>₹ / g</span><span></span></div>
-        ${rows.map((row) => `
-          <button type="button" class="tr ${row.status === 'INACTIVE' ? 'dim' : ''}" data-edit="metalMaster" data-id="${esc(row.id)}">
-            <span>${esc(row.metalType)}</span>
-            <span>${esc(row.purity)}</span>
-            <span>${row.rateInrPerGram ? money(row.rateInrPerGram) : '—'}</span>
-            <span>${row.status === 'INACTIVE' ? 'Off' : ''}</span>
-          </button>`).join('')}
-      </div>
-    </section>`;
+    ${groups.length ? groups.map(([type, items]) => `
+      <section class="list-card master-group">
+        <div class="list-head"><span>${esc(type)}</span><span>${items.length}</span></div>
+        <div class="master-list">${items.map((row) => {
+    const n = Number(row.rateInrPerGram || 0);
+    const off = String(row.status || 'ACTIVE') === 'INACTIVE';
+    return `<button type="button" class="master-row ${off ? 'dim' : ''}" data-edit="metalMaster" data-id="${esc(row.id)}">
+            <span class="master-id">
+              <em class="master-kicker">${esc(row.metalType)}</em>
+              <strong class="master-purity">${esc(row.purity)}</strong>
+            </span>
+            <span class="master-rate ${n > 0 ? '' : 'none'}">${n > 0 ? `${money(n)}/g` : 'No board rate'}</span>
+            ${off ? '<span class="master-off">Off</span>' : ''}
+          </button>`;
+  }).join('')}</div>
+      </section>`).join('') : `<div class="empty-khata grow">
+      <p class="empty-title">No metals</p>
+      <p class="lede">Add gold, silver, or a purity you use on purchase and give / get metal.</p>
+    </div>`}
+    </div>`;
 }
 
 function stamp(row, isNew) {
@@ -1208,6 +1313,8 @@ function bind() {
         render();
       } else if (action === 'export-report') downloadReport();
       else if (action === 'print-report') window.print();
+      else if (action === 'print-party') printOpenPartyKhata();
+      else if (action === 'share-party') await shareOpenPartyKhata();
     } catch (error) {
       state.error = error.message;
       render();
