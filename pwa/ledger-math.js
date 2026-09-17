@@ -56,12 +56,21 @@ export function skipInvalidMetalRow(row) {
   }
 }
 
+function humanPartyName(party) {
+  const name = String(party?.name || '').trim();
+  if (!name) return '';
+  const digits = name.replace(/\D/g, '');
+  const compact = name.replace(/[\s\-+().]/g, '');
+  if (digits.length >= 8 && digits.length <= 15 && compact === digits) return '';
+  return name;
+}
+
 export function summarizeLedger(suppliers, money, metal, settlements) {
   const bySupplier = suppliers.map((supplier) => {
     const payable = payableInr(money, settlements, supplier.id);
     return {
       id: supplier.id,
-      name: supplier.name,
+      name: humanPartyName(supplier) || 'Party',
       status: supplier.status || 'ACTIVE',
       payable,
       weOweInr: Math.max(0, payable),
@@ -80,7 +89,7 @@ export function summarizeLedger(suppliers, money, metal, settlements) {
       metalByPurityShop[key] = (metalByPurityShop[key] || 0) + grams;
     }
   }
-  const nameById = Object.fromEntries(suppliers.map((supplier) => [supplier.id, supplier.name]));
+  const nameById = Object.fromEntries(suppliers.map((supplier) => [supplier.id, humanPartyName(supplier) || 'Party']));
   const recentMoney = money.slice(0, 5).map((row) => ({ ...row, supplierName: nameById[row.supplierId] || '' }));
   return {
     supplierCount: suppliers.length,
@@ -209,7 +218,7 @@ export function reportForRange({
   const metalOut = metalRows.filter((row) => row.direction === 'ISSUE').reduce((n, row) => n + Number(row.weightGrams || 0), 0);
   const metalIn = metalRows.filter((row) => row.direction === 'RECEIPT').reduce((n, row) => n + Number(row.weightGrams || 0), 0);
   const settled = settleRows.reduce((n, row) => n + Number(row.moneyAmountInr || 0), 0);
-  const names = Object.fromEntries(suppliers.map((row) => [row.id, row.name]));
+  const names = Object.fromEntries(suppliers.map((row) => [row.id, humanPartyName(row) || 'Party']));
   const byPartyMap = {};
   const bump = (id, patch) => {
     if (!id) return;

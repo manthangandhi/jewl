@@ -113,9 +113,9 @@ export function buildDemoLedger(asOf = new Date()) {
   return {
     meta: { shopName: 'Mehta Jewellers', schemaVersion: SCHEMA_VERSION, createdAt: t(90).createdAt },
     suppliers,
-    money,
-    metal,
-    settlements,
+    money: withSupplierNames(money, suppliers),
+    metal: withSupplierNames(metal, suppliers),
+    settlements: withSupplierNames(settlements, suppliers),
     metalMaster
   };
 }
@@ -137,6 +137,13 @@ export function partyDisplayName(party) {
   const name = String(party?.name || '').trim();
   if (!name || isPhoneLike(name)) return '';
   return name;
+}
+
+export function assertPartyName(name) {
+  const n = String(name || '').trim();
+  if (!n) throw new Error('Enter the party name');
+  if (isPhoneLike(n)) throw new Error('Name is the party, not the mobile. Put the number in Phone.');
+  return n;
 }
 
 function humanName(value) {
@@ -277,6 +284,36 @@ export function mergeDemoLedger(ledger, demo) {
   for (const row of demo.metalMaster || []) master = upsertById(master, row);
   next.metalMaster = master;
   next.meta = { ...(next.meta || {}), shopName: next.meta?.shopName || demo.meta?.shopName || '' };
+  return next;
+}
+
+function dropDemoIdRows(list) {
+  return (list || []).filter((row) => !String(row?.id || '').startsWith('demo-'));
+}
+
+export function stripDemoLedger(ledger) {
+  const current = ledger || emptyLedger();
+  const next = { ...current };
+  for (const key of ['suppliers', 'money', 'metal', 'settlements']) {
+    next[key] = dropDemoIdRows(current[key]);
+  }
+  next.metalMaster = current.metalMaster || [];
+  next.meta = { ...(current.meta || {}) };
+  return next;
+}
+
+export function replaceDemoLedger(ledger, demo) {
+  const current = ledger || emptyLedger();
+  const sample = demo || emptyLedger();
+  const next = { ...current };
+  for (const key of ['suppliers', 'money', 'metal', 'settlements']) {
+    next[key] = dropDemoIdRows(current[key]).concat((sample[key] || []).map((row) => ({ ...row })));
+  }
+  let master = (current.metalMaster || []).slice();
+  for (const row of sample.metalMaster || []) master = upsertById(master, row);
+  next.metalMaster = master;
+  const existingName = String(current.meta?.shopName || '').trim();
+  next.meta = { ...(current.meta || {}), schemaVersion: SCHEMA_VERSION, shopName: existingName };
   return next;
 }
 

@@ -181,21 +181,29 @@ function demoStamp_(n) {
 
 function demoLedger_() {
   const t = demoStamp_;
+  const names = {
+    "demo-ramesh": "Ramesh Karigar",
+    "demo-suresh": "Suresh Jewels",
+    "demo-mehta": "Mehta Silver House",
+    "demo-fatima": "Fatima Polishing Works",
+    "demo-gupta": "Gupta Casting Co",
+    "demo-kiran": "Kiran Chain Maker"
+  };
   function party(id, name, phone, city, notes, ago) {
     const s = t(ago);
     return { id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
   function money(id, supplierId, type, amount, note, ago) {
     const s = t(ago);
-    return { id: id, supplierId: supplierId, type: type, amountInr: amount, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+    return { id: id, supplierId: supplierId, supplierName: names[supplierId] || "", type: type, amountInr: amount, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
   function metal(id, supplierId, direction, metalType, purity, grams, note, ago) {
     const s = t(ago);
-    return { id: id, supplierId: supplierId, direction: direction, metalType: metalType, purity: purity, weightGrams: grams, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+    return { id: id, supplierId: supplierId, supplierName: names[supplierId] || "", direction: direction, metalType: metalType, purity: purity, weightGrams: grams, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
   function settle(id, supplierId, cash, metalType, purity, grams, note, ago) {
     const s = t(ago);
-    return { id: id, supplierId: supplierId, moneyAmountInr: cash, metalType: metalType || "", purity: purity || "", metalGrams: grams || 0, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+    return { id: id, supplierId: supplierId, supplierName: names[supplierId] || "", moneyAmountInr: cash, metalType: metalType || "", purity: purity || "", metalGrams: grams || 0, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
   const now = t(0);
   return {
@@ -271,7 +279,9 @@ function seedDemoLedger_(opt) {
       return row;
     });
   }
-  writeMeta_({ shopName: demo.shopName || "Mehta Jewellers", schemaVersion: "1" });
+  const existingMeta = metaObject_(readRowsAsObjects_("_Meta"));
+  const shopName = String((existingMeta && existingMeta.shopName) || "").trim();
+  writeMeta_({ shopName: shopName || demo.shopName || "", schemaVersion: "1" });
   writeObjectsAsRows_("Suppliers", demo.suppliers);
   writeObjectsAsRows_("Money", named(demo.money));
   writeObjectsAsRows_("Metal", named(demo.metal));

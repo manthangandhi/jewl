@@ -1,7 +1,7 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
-  buildDemoLedger, mergeDemoLedger, dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName
+  buildDemoLedger, replaceDemoLedger, stripDemoLedger, dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName, assertPartyName
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
@@ -302,14 +302,30 @@ async function seedDemoIntoSheet({ silent } = {}) {
       : 'This writes a 3-month DEMO khata into this Google Sheet. Use only to show the product — not for a live shop.';
     if (!confirm(warn)) return;
   }
-  const next = mergeDemoLedger(state, buildDemoLedger(new Date()));
+  const next = dedupePartyLedger(replaceDemoLedger(state, buildDemoLedger(new Date())));
   state.suppliers = next.suppliers;
   state.money = next.money;
   state.metal = next.metal;
   state.settlements = next.settlements;
   state.metalMaster = next.metalMaster;
   state.meta = next.meta;
-  if (!state.shopName) state.shopName = next.meta?.shopName || 'Mehta Jewellers';
+  refreshSummary();
+  await persist();
+  render();
+}
+
+async function stripDemoFromSheet() {
+  if (!state.suppliers.some((row) => String(row.id || '').startsWith('demo-'))) {
+    state.error = 'No sample khata on this Sheet.';
+    render();
+    return;
+  }
+  if (!confirm('Remove the DEMO sample khata? Real parties stay.')) return;
+  const next = stripDemoLedger(state);
+  state.suppliers = next.suppliers;
+  state.money = next.money;
+  state.metal = next.metal;
+  state.settlements = next.settlements;
   refreshSummary();
   await persist();
   render();
@@ -555,15 +571,15 @@ function partiesHome() {
     const dir = moneyDirection(row.payable);
     const metal = metalPills(row.metalByPurity);
     const party = state.suppliers.find((s) => s.id === row.id) || {};
-    return `<button type="button" class="cell ${dir.tone}" data-supplier="${esc(row.id)}">
+    return `<button type="button" class="cell party-row ${dir.tone}" data-supplier="${esc(row.id)}">
         <span class="avatar">${esc(initials(partyLabel(party) !== 'Party' ? partyLabel(party) : partyLabel(row)))}</span>
-        <span class="cell-main"><strong>${esc(partyLabel({ ...row, ...party }))}</strong>${party.phone ? `<small>${esc(party.phone)}</small>` : ''}${metal || ''}</span>
+        <span class="cell-main"><strong class="party-name">${esc(partyLabel({ ...row, ...party }))}</strong>${String(row.id || party.id || '').startsWith('demo-') ? '<small class="demo-tag">DEMO</small>' : ''}${party.phone ? `<small class="party-phone">${esc(party.phone)}</small>` : ''}${metal || ''}</span>
         <span class="cell-trail ${dir.tone}">${dir.amount ? `<em>${dir.label}</em><b>${money(dir.amount)}</b>` : '<b class="zero">—</b>'}</span>
         ${ic('chevron')}
       </button>`;
   }).join('')}</div>
     </section>` : `<div class="empty-khata grow">
-      <p>No parties yet</p>
+      <p class="empty-title">No parties yet</p>
       <p class="lede">Add a karigar or supplier. Gold, silver, and cash all sit on that one card.</p>
       <button class="btn btn-primary" data-action="modal" data-modal="supplier">Add party</button>
     </div>`;
@@ -733,7 +749,7 @@ function tourOverlay() {
       <p class="eyebrow">How this works · ${state.tourStep + 1} / ${TOUR.length}</p>
       <h2>${esc(step.title)}</h2>
       <p>${esc(step.body)}</p>
-      <div class="form-actions">
+      <div class="form-actions tour-actions">
         <button type="button" class="btn btn-soft" data-action="tour-skip">Skip</button>
         <button type="button" class="btn btn-primary" data-action="tour-next">${last ? 'Done' : 'Next'}</button>
       </div>
@@ -752,7 +768,11 @@ function booksView() {
       ${ic('chevron')}
     </button>
     <button class="cell" data-action="seed-demo" type="button">
-      <span class="cell-main"><strong>Load demo khata (optional)</strong><small>For product demos only — writes sample parties into this Sheet</small></span>
+      <span class="cell-main"><strong>Load demo khata (optional)</strong><small>For product demos only — replaces sample parties, not your live ones</small></span>
+      ${ic('chevron')}
+    </button>
+    <button class="cell" data-action="strip-demo" type="button">
+      <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes demo- parties and their sample journals</small></span>
       ${ic('chevron')}
     </button>
     ${state.spreadsheetUrl ? `<a class="cell" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">
@@ -1117,6 +1137,7 @@ function bind() {
       else if (action === 'setup') { state.setupOpen = !state.setupOpen; state.gate = 'login'; landing(); }
       else if (action === 'refresh') await refreshFromSheet();
       else if (action === 'seed-demo') await seedDemoIntoSheet();
+      else if (action === 'strip-demo') await stripDemoFromSheet();
       else if (action === 'gate') {
         state.gate = target.dataset.gate;
         state.error = null;
@@ -1303,7 +1324,7 @@ async function submitForm(event) {
     const isNew = !state.editing;
     const id = state.editing?.id || nid();
     if (kind === 'supplier') {
-      const row = stamp({ ...(state.editing || {}), id, name: data.name.trim(), phone: data.phone || '', notes: data.notes || '', status: 'ACTIVE' }, isNew);
+      const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', notes: data.notes || '', status: 'ACTIVE' }, isNew);
       state.suppliers = upsertById(state.suppliers, row);
       markDirty('suppliers', id);
       if (isNew && Number(data.openingMoney) > 0) {
@@ -1454,7 +1475,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.getRegistrations()
     .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
     .then(() => caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))))
-    .then(() => navigator.serviceWorker.register('./service-worker.js?v=17'))
+    .then(() => navigator.serviceWorker.register('./service-worker.js?v=18'))
     .catch(() => {});
 }
 
