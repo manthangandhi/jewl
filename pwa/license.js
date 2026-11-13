@@ -15,12 +15,17 @@ export function isConfiguredUrl(url) {
   return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u);
 }
 
-/** Parse an ISO date, or a day-first date such as 13/11/2026 typed into a Sheet. NaN when it is not a date. */
+/** Parse an ISO date, or a day-first date such as 13/11/2026 typed into a Sheet. A date with no time lasts to the end of that day in India. NaN when it is not a date. */
 export function parseEnd(raw) {
   const s = String(raw || '').trim();
   if (!s) return NaN;
   const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s);
-  if (dmy) return Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 23, 59, 59);
+  if (dmy) {
+    const [d, m, y] = [Number(dmy[1]), Number(dmy[2]), Number(dmy[3])];
+    if (m < 1 || m > 12 || d < 1 || d > 31) return NaN;
+    return Date.parse(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T23:59:59+05:30`);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Date.parse(`${s}T23:59:59+05:30`);
   return Date.parse(s);
 }
 

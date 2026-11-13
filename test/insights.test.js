@@ -29,6 +29,7 @@ test('mix, best customers, ageing, quiet customers', () => {
   const age = duesAgeing(customers, sales, now);
   assert.equal(age[0].count, 1);
   assert.equal(age[0].amountInr, 30000);
+  assert.equal(age[3].amountInr, 0);
   assert.equal(quietCustomers(customers, sales, { days: 20, now })[0].name, 'Bhavin');
   assert.equal(changePct(150, 100), 50);
   assert.equal(changePct(1, 0), null);
@@ -41,7 +42,9 @@ test('a board rate typed on an earlier day does not hide the live price', () => 
   const row = (updatedAt) => [{ metalType: 'GOLD', purity: '24K', rateInrPerGram: 7800, status: 'ACTIVE', updatedAt }];
   assert.equal(effectiveRate({ master: row(today), snapshot }, 'GOLD', '24K').source, 'board');
   assert.equal(effectiveRate({ master: row(old), snapshot }, 'GOLD', '24K').source, 'live');
-  assert.equal(boardRateIsToday({}), true);
+  assert.equal(boardRateIsToday({}), false);
+  assert.equal(boardRateIsToday({ updatedAt: 'garbage' }), false);
+  assert.equal(boardRateIsToday({ updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19) }), true);
 });
 
 test('license: the trial end date counts even when the status says ACTIVE', () => {

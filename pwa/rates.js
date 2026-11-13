@@ -26,6 +26,9 @@ export const SECOND_OPINION = {
 };
 
 /** India's customs duty on bullion (percent) as the starting point; the owner can change each one. */
+/** After this many hours a saved price is shown as old, not live. */
+export const OLD_RATE_HOURS = 6;
+
 export const DEFAULT_ADJUST = { GOLD: 6, SILVER: 6, PLATINUM: 6.4 };
 
 /** Believable ranges, so a broken feed can never put a silly number on the screen. */
@@ -89,18 +92,19 @@ export function effectiveRate({ master = [], snapshot = null, adjust = DEFAULT_A
   const manual = Number(row?.rateInrPerGram || 0);
   if (manual > 0 && boardRateIsToday(row, now)) return { perGram: manual, source: 'board' };
   const live = liveRate(snapshot, type, purity, adjustFor(adjust, type));
-  return live > 0 ? { perGram: live, source: 'live' } : { perGram: 0, source: 'none' };
+  const old = snapshot && now - Number(snapshot.fetchedAt || 0) > OLD_RATE_HOURS * 3600000;
+  return live > 0 ? { perGram: live, source: old ? 'old' : 'live' } : { perGram: 0, source: 'none' };
 }
 
 /**
  * A board rate is today's rate. One typed on an earlier day is old news and must not hide the live price,
- * so it only counts when it was saved on the same calendar day. A row with no save date counts (older data).
+ * so it only counts when it was saved on the same calendar day. A rate with no readable save date is treated as old, so it can never hide the live price.
  */
 export function boardRateIsToday(row, now = Date.now()) {
-  const raw = row?.updatedAt;
-  if (!raw) return true;
+  const raw = String(row?.updatedAt || '').trim().replace(' ', 'T');
+  if (!raw) return false;
   const t = Date.parse(raw);
-  if (!Number.isFinite(t)) return true;
+  if (!Number.isFinite(t)) return false;
   return new Date(t).toDateString() === new Date(now).toDateString();
 }
 

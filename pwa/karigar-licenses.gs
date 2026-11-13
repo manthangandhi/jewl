@@ -74,7 +74,12 @@ function parseEnd_(raw) {
   const s = String(raw || "").trim();
   if (!s) return NaN;
   const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s);
-  if (m) return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 23, 59, 59);
+  if (m) {
+    const d = Number(m[1]), mo = Number(m[2]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return NaN;
+    return Date.parse(m[3] + "-" + ("0" + mo).slice(-2) + "-" + ("0" + d).slice(-2) + "T23:59:59+05:30");
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Date.parse(s + "T23:59:59+05:30");
   return Date.parse(s);
 }
 
@@ -103,7 +108,11 @@ function headerIndex_(headers, name) {
 
 function isoCell_(value) {
   if (!value) return "";
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) {
+    // A date typed into the Sheet has no time. Keep it as a plain date so it lasts to the end of that day.
+    const local = Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm");
+    return local.slice(11) === "00:00" ? local.slice(0, 10) : value.toISOString();
+  }
   return String(value).trim();
 }
 

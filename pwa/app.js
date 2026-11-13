@@ -1,4 +1,4 @@
-import { monthlyTrend, salesMix, topCustomers, duesAgeing, quietCustomers, changePct } from './insights.js';
+import { monthlyTrend, salesMix, topCustomers, duesAgeing, quietCustomers, repeatStats, returnRates, changePct, PERIODS, periodRange, monthsForRange, filterSales } from './insights.js';
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   SALE, RETURN, PAYMENT, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
@@ -70,6 +70,7 @@ const state = {
   syncing: false,
   metalMaster: seedMetalMaster([]),
   reportPreset: 'month',
+  ins: { period: '6m', metal: '', category: '', customerId: '' },
   reportFrom: '',
   reportTo: '',
   partyFilter: 'all',
@@ -156,6 +157,7 @@ function ic(name) {
     today: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
     sheet: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>',
     report: '<path d="M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     insights: '<path d="M3 17l5-5 4 3 8-9"/><path d="M15 6h5v5"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/>',
@@ -450,6 +452,22 @@ function mergeRemote(remote) {
   state.dirty = keep.dirty;
   state.deleted = keep.deleted;
   state.scriptOutdated = outdated;
+  if (clearDemoBoardRates()) state.needsDedupeSave = true;
+}
+
+/** Early demo data came with made-up board rates (gold 24K at 7,800 and so on). They must never stand in for the market. */
+const DEMO_BOARD_RATES = { 'mm-gold-24k': 7800, 'mm-gold-22k': 7200, 'mm-gold-18k': 5900, 'mm-gold-14k': 4600, 'mm-silver-999': 118, 'mm-silver-925': 108 };
+function clearDemoBoardRates() {
+  let changed = false;
+  state.metalMaster = state.metalMaster.map((row) => {
+    if (DEMO_BOARD_RATES[row.id] && Number(row.rateInrPerGram) === DEMO_BOARD_RATES[row.id]) {
+      changed = true;
+      markDirty('metalMaster', row.id);
+      return { ...row, rateInrPerGram: '', updatedAt: new Date().toISOString() };
+    }
+    return row;
+  });
+  return changed;
 }
 
 async function refreshFromSheet() {
@@ -839,7 +857,8 @@ function rateRows() {
 function rateBoard() {
   const rows = rateRows().filter((r) => r.perGram > 0);
   if (!rows.length) return '';
-  return `<div class="rate-board" aria-label="Rates per gram">${rows.map((r) => (
+  const stale = rows.some((r) => r.source === 'old');
+  return `<div class="rate-board ${stale ? 'stale' : ''}" aria-label="Rates per gram">${stale ? '<span class="rate-old">Old prices. Not live</span>' : ''}${rows.map((r) => (
     `<div class="rate-chip" data-metal="${esc(r.row.metalType)}"><em>${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</em><strong>${money(r.perGram)}/g</strong></div>`
   )).join('')}</div>`;
 }
@@ -868,7 +887,7 @@ function ratesCard() {
     ${live.length ? `<ul class="rate-tiles">${live.map((r) => {
     const t = String(r.row.metalType).toUpperCase();
     const q = dealerQuote(t, r.perGram);
-    const tag = r.source === 'board' ? 'Your board rate' : `World price plus ${adjustFor(state.rateAdjust, t)}%`;
+    const tag = r.source === 'board' ? 'Your rate, typed today' : r.source === 'old' ? `Old price, from ${age}. Not live` : `Live world price plus ${adjustFor(state.rateAdjust, t)}%`;
     return `<li data-metal="${esc(r.row.metalType)}">
       <span class="rate-name">${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</span>
       <strong>${money(r.perGram)}<small>per gram</small></strong>
@@ -901,7 +920,7 @@ function ratesCard() {
 
 function refreshRateDom() {
   const board = root.querySelector('.rate-board');
-  const html = rateBoard();
+  const html = state.view === 'today' ? '' : rateBoard();
   if (board && html) board.outerHTML = html;
   else if (board && !html) board.remove();
   else if (!board && html) { const stage = root.querySelector('.stage'); if (stage) stage.insertAdjacentHTML('beforebegin', html); }
@@ -1257,6 +1276,7 @@ function fmtLong(v) {
 const wishText = (c, label) => `${label === 'Birthday' ? `Happy birthday ${c.name}! Wishing you a wonderful year ahead.` : `Happy anniversary ${c.name}! Wishing you many more happy years together.`} From all of us at ${state.shopName || 'our shop'}.`;
 
 function todayView() {
+  const C = LABEL.customer;
   const t = today();
   const everyone = [
     ...state.customers.map((c) => ({ ...c, _kind: 'customer' })),
@@ -1270,15 +1290,22 @@ function todayView() {
   const link = (kind, id) => (kind === 'customer' ? `data-customer="${esc(id)}"` : `data-supplier="${esc(id)}"`);
   const empty = (icon, text) => `<div class="empty-in">${ic(icon)}<span>${text}</span></div>`;
   const head = (icon, title, count) => `<div class="list-head"><span class="head-title">${ic(icon)}<span>${title}</span></span><span>${count}</span></div>`;
-  const todayCount = follow.filter((f) => f.days <= 0).length;
+  const todayTotals = salesPeriodTotals(state.sales, { from: t, to: t });
+  const receivedToday = todayTotals.receivedInr + state.sales.filter((r) => String(r.date || '').slice(0, 10) === t && r.kind === 'SALE').reduce((n, r) => n + Number(r.paidInr || 0), 0);
   const stat = (icon, label, figure, tone = '') => `<div class="stat ${tone}"><span class="stat-ic">${ic(icon)}</span><span class="stat-text"><span>${label}</span><strong>${figure}</strong></span></div>`;
   return `
     <div class="today">
       <section class="glance" aria-label="At a glance">
         ${stat('in', LABEL.weGet, money(state.custSummary?.customersOweInr || 0), 'collect')}
         ${stat('out', LABEL.weGive, money(state.summary?.weOweInr || 0), 'owe')}
-        ${stat('sold', 'Sales this month', money(month.soldInr))}
-        ${stat('bell', 'To follow up', String(todayCount))}
+        ${stat('sold', 'Sold today', money(todayTotals.soldInr - todayTotals.returnedInr))}
+        ${stat('rupee', 'Received today', money(receivedToday))}
+      </section>
+      <section class="quick-actions" aria-label="Quick actions">
+        <button type="button" class="act primary" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>${C.sale}</strong><small>A customer bought</small></span></button>
+        <button type="button" class="act" data-action="modal" data-modal="custpay">${ic('rupee')}<span><strong>${C.payment}</strong><small>A customer paid</small></span></button>
+        <button type="button" class="act" data-action="modal" data-modal="customer">${ic('plus')}<span><strong>Add customer</strong><small>New person</small></span></button>
+        <button type="button" class="act" data-action="modal" data-modal="money">${ic('out')}<span><strong>Supplier entry</strong><small>Purchase or payment</small></span></button>
       </section>
       <section class="list-card w-follow">
         ${head('bell', 'Follow-ups', follow.length)}
@@ -1461,66 +1488,107 @@ function trendChart(months) {
   return `<svg class="trend-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Sales and money collected by month">${grid}${bars}</svg>`;
 }
 
+function moreView() {
+  const row = (view, icon, title, note) => `<button type="button" class="cell" data-view="${view}">${ic(icon)}<span class="cell-main"><strong>${title}</strong><small>${note}</small></span></button>`;
+  return `<div class="more-page"><section class="list-card">
+    <div class="list-head"><span class="head-title">${ic('menu')}<span>More</span></span></div>
+    <div class="plain-list">
+      ${row('report', 'report', 'Reports', 'Entries by date, supplier totals, print and export')}
+      ${row('masters', 'masters', 'Metals and rates', 'Purities, item types and your own board rate')}
+      ${row('books', 'sheet', 'My Google Sheet', 'Open your books, back up, update')}
+      ${row('help', 'help', 'How to', 'Short guides and support')}
+    </div></section></div>`;
+}
+
 function insightsView() {
   const now = new Date();
-  const months = monthlyTrend({ sales: state.sales, money: state.money }, now, 6);
+  const f = state.ins;
+  const range = periodRange(f.period, now, state.sales.map((r) => String(r.date || '').slice(0, 10)).filter(Boolean).sort()[0]);
+  const filtered = filterSales(state.sales, { ...range, metal: f.metal, category: f.category, customerId: f.customerId });
+  const monthCount = monthsForRange(range, now);
+  const months = monthlyTrend({ sales: filterSales(state.sales, { metal: f.metal, category: f.category, customerId: f.customerId }), money: f.customerId || f.metal || f.category ? [] : state.money }, now, monthCount);
   const cur = months[months.length - 1];
   const prev = months[months.length - 2];
   const salesChange = changePct(cur.sold, prev.sold);
-  const ninety = new Date(now.getTime() - 90 * 86400000).toISOString().slice(0, 10);
-  const mix = salesMix(state.sales, { from: ninety });
-  const best = topCustomers(state.customers, state.sales, { from: ninety, limit: 5 });
-  const ageing = duesAgeing(state.customers, state.sales, now);
+  const mix = salesMix(filtered);
+  const trendTxt = salesChange === null ? '' : salesChange >= 0 ? `Latest month up ${salesChange}%` : `Latest month down ${Math.abs(salesChange)}%`;
+  const best = topCustomers(state.customers, filtered, { limit: 5 });
+  const scoped = Boolean(f.metal || f.category || f.customerId);
+  const ageing = duesAgeing(state.customers, f.customerId ? state.sales.filter((r) => r.customerId === f.customerId) : state.sales, now);
   const dues = ageing.reduce((n, b) => n + b.amountInr, 0);
   const quiet = quietCustomers(state.customers, state.sales, { days: 90, now, limit: 5 });
-  const items = categoryTotals(state.sales, { from: ninety }).filter((r) => r.soldInr > 0).sort((a, b) => b.soldInr - a.soldInr).slice(0, 6);
+  const items = categoryTotals(filtered, {}).filter((r) => r.soldInr > 0).sort((a, b) => b.soldInr - a.soldInr).slice(0, 6);
+  const allCats = [...new Set(state.sales.map((r) => String(r.category || '')).filter(Boolean))].sort();
+  const periodLabel = (PERIODS.find(([id]) => id === f.period) || [])[1] || '';
+  const soldInPeriod = filtered.filter((r) => r.kind === 'SALE').reduce((n, r) => n + Number(r.amountInr || 0), 0);
+  const returnedInPeriod = filtered.filter((r) => r.kind === 'RETURN').reduce((n, r) => n + Number(r.amountInr || 0), 0);
+  const gramsSold = filtered.filter((r) => r.kind === 'SALE').reduce((n, r) => n + Number(r.weightGrams || 0), 0);
+  const paidInPeriod = filtered.filter((r) => r.kind === 'PAYMENT').reduce((n, r) => n + Number(r.amountInr || 0), 0) + filtered.filter((r) => r.kind === 'SALE').reduce((n, r) => n + Number(r.paidInr || 0), 0);
+  const filterBar = `<form class="ins-filters" data-own aria-label="Filters">
+    <div class="chips" role="group" aria-label="Period">${PERIODS.map(([id, label]) => `<button type="button" class="chip ${f.period === id ? 'on' : ''}" data-ins="period" data-value="${id}">${label}</button>`).join('')}</div>
+    <div class="ins-selects">
+      <label>Metal<select data-ins-select="metal"><option value="">All metals</option>${['GOLD', 'SILVER', 'PLATINUM'].map((m) => `<option value="${m}" ${f.metal === m ? 'selected' : ''}>${titleCase(m)}</option>`).join('')}</select></label>
+      <label>Item<select data-ins-select="category"><option value="">All items</option>${allCats.map((c) => `<option ${f.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+      <label>Customer<select data-ins-select="customerId"><option value="">All customers</option>${state.customers.map((c) => `<option value="${esc(c.id)}" ${f.customerId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      ${scoped ? `<button type="button" class="btn-plain" data-ins="reset">${ic('refresh')}<span>Clear filters</span></button>` : ''}
+    </div></form>`;
   const mixColour = { GOLD: 'var(--swatch-gold)', SILVER: 'var(--swatch-silver)', PLATINUM: 'var(--swatch-platinum)' };
-  const hasSales = state.sales.length > 0;
-  const trendTxt = salesChange === null ? 'No sales last month to compare' : salesChange >= 0 ? `Up ${salesChange}% on last month` : `Down ${Math.abs(salesChange)}% on last month`;
+  const rep = repeatStats(filtered);
+  const rets = returnRates(filtered, 4);
+  const over60 = ageing[2].amountInr + ageing[3].amountInr;
   const pay = (state.summary?.bySupplier || []).filter((r) => r.payable > 0).sort((a, b) => b.payable - a.payable).slice(0, 5);
   const maxPay = Math.max(1, ...pay.map((r) => r.payable));
   const maxBest = Math.max(1, ...best.map((r) => r.netInr));
   const maxAge = Math.max(1, ...ageing.map((b) => b.amountInr));
   const maxItem = Math.max(1, ...items.map((r) => r.soldInr));
+  const filterNote = [periodLabel, f.metal && titleCase(f.metal), f.category, f.customerId && state.customers.find((c) => c.id === f.customerId)?.name].filter(Boolean).join(', ');
   const stat = (label, figure, note, tone = '') => `<div class="insight-stat ${tone}"><span>${label}</span><strong>${figure}</strong><small>${note}</small></div>`;
-  const barRow = (label, sub, value, max, tone = '') => `<li><span>${esc(label)}${sub ? ` <small>${esc(sub)}</small>` : ''}</span><span class="bar-track"><i class="bar ${tone}" style="--w:${Math.max(2, Math.round((value / max) * 100))}%"></i></span><b>${money(value)}</b></li>`;
-  if (!hasSales && !state.money.length) {
-    return `<div class="report-page fill"><div class="empty-khata"><p class="empty-title">Insights appear as you record business</p><p class="lede">Add a few sales and payments and this page will show trends, your best customers and who owes you.</p></div></div>`;
+  const barRow = (label, sub, value, max, tone = '', fig = money(value)) => `<li><span>${esc(label)}${sub ? ` <small>${esc(sub)}</small>` : ''}</span><span class="bar-track"><i class="bar ${tone}" style="--w:${Math.max(2, Math.round((value / max) * 100))}%"></i></span><b>${fig}</b></li>`;
+  if (!state.sales.length && !state.money.length) {
+    return `<div class="report-page fill"><div class="empty-khata"><p class="empty-title">Insights appear as you record business</p><p class="lede">Add a few sales and payments and this page will show trends, your best customers and who owes you.</p><button class="btn btn-primary" type="button" data-view="customers">${ic('customers')}<span>Go to customers</span></button></div></div>`;
   }
   return `
     <div class="insights">
-      <section class="insight-stats" aria-label="This month">
-        ${stat('Sales this month', money(cur.sold), esc(trendTxt), salesChange !== null && salesChange < 0 ? 'owe' : 'collect')}
-        ${stat('Collected this month', money(cur.collected), cur.sold ? `${Math.min(999, Math.round((cur.collected / cur.sold) * 100))}% of what you sold` : 'Money received')}
-        ${stat('Paid to suppliers', money(cur.paidOut), 'This month')}
-        ${stat('Customers owe you', money(dues), ageing[2].count ? `${money(ageing[2].amountInr)} is over 60 days old` : 'Nothing overdue', ageing[2].count ? 'owe' : '')}
+      ${filterBar}
+      <p class="ins-now" role="status">Showing: ${esc(filterNote)}${scoped ? '. Payments received are left out when a metal or item is chosen, because a payment has no item.' : ''}</p>
+      <section class="insight-stats" aria-label="Summary">
+        ${stat('Sales', money(soldInPeriod - returnedInPeriod), `${money(soldInPeriod)} sold, ${money(returnedInPeriod)} returned`)}
+        ${stat('Weight sold', grams(gramsSold), `${rep.customers} ${rep.customers === 1 ? 'customer' : 'customers'}, average bill ${money(rep.avgBillInr)}`)}
+        ${stat('Money received', money(paidInPeriod), soldInPeriod ? `${Math.min(999, Math.round((paidInPeriod / soldInPeriod) * 100))}% of what you sold` : 'Paid at sale and later payments')}
+        ${stat('Customers owe you', money(dues), over60 ? `${money(over60)} is over 60 days old` : 'Nothing overdue', over60 ? 'owe' : '')}
       </section>
       <section class="list-card ins-wide">
-        <div class="list-head"><span class="head-title">${ic('insights')}<span>Sales and money collected, last 6 months</span></span>
-          <span class="ch-legend"><i class="ch-key ch-sold"></i>Sales <i class="ch-key ch-in"></i>Collected</span></div>
+        <div class="list-head"><span class="head-title">${ic('insights')}<span>Sales and money received by month</span></span>
+          <span class="ch-legend"><i class="ch-key ch-sold"></i>Sales <i class="ch-key ch-in"></i>Received <span class="hint-inline">${esc(trendTxt)}</span></span></div>
         ${trendChart(months)}
         <details class="ch-table"><summary>${ic('list')}<span>See the numbers</span></summary>
-          <div class="data-table"><div class="th"><span>Month</span><span>Sales</span><span>Returns</span><span>Collected</span><span>Paid out</span></div>
+          <div class="data-table"><div class="th"><span>Month</span><span>Sales</span><span>Returns</span><span>Received</span><span>Paid out</span></div>
           ${months.slice().reverse().map((m) => `<div class="tr"><span>${esc(m.label)} ${m.year}</span><span>${money(m.sold)}</span><span>${money(m.returned)}</span><span>${money(m.collected)}</span><span>${money(m.paidOut)}</span></div>`).join('')}</div>
         </details>
       </section>
       <section class="list-card">
-        <div class="list-head"><span class="head-title">${ic('gem')}<span>What sells, last 90 days</span></span></div>
+        <div class="list-head"><span class="head-title">${ic('gem')}<span>What sells</span></span><span>${esc(periodLabel)}</span></div>
         ${mix.length ? `<div class="mix-bar" role="img" aria-label="Share of sales by metal">${mix.map((m) => `<i style="flex:${m.amountInr};background:${mixColour[m.metalType] || 'var(--color-pencil)'}" title="${esc(titleCase(m.metalType))} ${m.pct}%"></i>`).join('')}</div>
-        <ul class="mix-legend">${mix.map((m) => `<li><i style="background:${mixColour[m.metalType] || 'var(--color-pencil)'}"></i>${esc(titleCase(m.metalType))} <b>${m.pct}%</b> <small>${money(m.amountInr)}</small></li>`).join('')}</ul>` : '<div class="empty-in">No sales in the last 90 days</div>'}
+        <ul class="mix-legend">${mix.map((m) => `<li><i style="background:${mixColour[m.metalType] || 'var(--color-pencil)'}"></i>${esc(titleCase(m.metalType))} <b>${m.pct}%</b> <small>${money(m.amountInr)}</small></li>`).join('')}</ul>` : '<div class="empty-in">No sales for these filters</div>'}
         ${items.length ? `<ol class="barchart" aria-label="Best selling items">${items.map((r) => barRow(r.category, titleCase(r.metalType), r.soldInr, maxItem)).join('')}</ol>` : ''}
       </section>
       <section class="list-card">
-        <div class="list-head"><span class="head-title">${ic('customers')}<span>Best customers, last 90 days</span></span></div>
-        ${best.length ? `<ol class="barchart">${best.map((r) => barRow(r.name, `${r.visits} ${r.visits === 1 ? 'purchase' : 'purchases'}`, r.netInr, maxBest)).join('')}</ol>` : '<div class="empty-in">No sales in the last 90 days</div>'}
+        <div class="list-head"><span class="head-title">${ic('customers')}<span>Best customers</span></span><span>${esc(periodLabel)}</span></div>
+        ${best.length ? `<ol class="barchart">${best.map((r) => barRow(r.name, `${r.visits} ${r.visits === 1 ? 'purchase' : 'purchases'}`, r.netInr, maxBest)).join('')}</ol>` : '<div class="empty-in">No sales for these filters</div>'}
+        <p class="hint ins-foot">${rep.repeat} of ${rep.customers} ${rep.customers === 1 ? 'customer' : 'customers'} bought more than once.</p>
       </section>
       <section class="list-card">
         <div class="list-head"><span class="head-title">${ic('in')}<span>Who owes you, by age</span></span><span>${money(dues)}</span></div>
-        <ol class="barchart">${ageing.map((b, i) => barRow(b.label, `${b.count} ${b.count === 1 ? 'customer' : 'customers'}`, b.amountInr, maxAge, i === 2 ? 'warn' : '')).join('')}</ol>
+        <ol class="barchart">${ageing.map((b, i) => barRow(b.label, `${b.count} ${b.count === 1 ? 'customer' : 'customers'}`, b.amountInr, maxAge, i >= 2 ? 'warn' : '')).join('')}</ol>
+        <p class="hint ins-foot">Age is counted from the bill. Payments settle the oldest bills first.</p>
       </section>
       <section class="list-card">
         <div class="list-head"><span class="head-title">${ic('out')}<span>You owe suppliers</span></span><span>${money(state.summary?.weOweInr || 0)}</span></div>
         ${pay.length ? `<ol class="barchart">${pay.map((r) => barRow(r.name, '', r.payable, maxPay, 'warn')).join('')}</ol>` : '<div class="empty-in">Nothing to pay right now</div>'}
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span class="head-title">${ic('sold')}<span>Items that come back</span></span><span>${esc(periodLabel)}</span></div>
+        ${rets.length ? `<ol class="barchart">${rets.map((r) => barRow(r.category, `${money(r.returned)} of ${money(r.sold)}`, r.pct, 100, 'warn', `${r.pct}%`)).join('')}</ol>` : '<div class="empty-in">No returns for these filters</div>'}
       </section>
       <section class="list-card ins-wide">
         <div class="list-head"><span class="head-title">${ic('bell')}<span>Customers who have gone quiet</span></span><span>${quiet.length}</span></div>
@@ -1716,6 +1784,7 @@ function viewContent() {
   if (state.view === 'today') return todayView();
   if (state.view === 'report') return reportView();
   if (state.view === 'insights') return insightsView();
+  if (state.view === 'more') return moreView();
   if (state.view === 'today') return reportView();
   if (state.view === 'masters') return mastersView();
   if (state.view === 'books') return booksView();
@@ -1744,7 +1813,8 @@ function render() {
         <button class="nav-item nav-core ${on('insights')}" data-view="insights" type="button" ${on('insights') ? 'aria-current="page"' : ''}>${ic('insights')}<span>Insights</span></button>
         <button class="nav-item ${on('report')}" data-view="report" type="button" ${on('report') ? 'aria-current="page"' : ''}>${ic('report')}<span>Report</span></button>
         <button class="nav-item ${on('masters')}" data-view="masters" type="button" ${on('masters') ? 'aria-current="page"' : ''}>${ic('masters')}<span>Metals</span></button>
-        <button class="nav-item nav-core ${on('books')}" data-view="books" type="button" ${on('books') ? 'aria-current="page"' : ''}>${ic('sheet')}<span>Sheet</span></button>
+        <button class="nav-item nav-core nav-more ${on('more', 'report', 'masters', 'books', 'help')}" data-view="more" type="button" ${on('more', 'report', 'masters', 'books', 'help') ? 'aria-current="page"' : ''}>${ic('menu')}<span>More</span></button>
+        <button class="nav-item ${on('books')}" data-view="books" type="button" ${on('books') ? 'aria-current="page"' : ''}>${ic('sheet')}<span>Sheet</span></button>
         <button class="nav-item ${on('help')}" data-view="help" type="button" ${on('help') ? 'aria-current="page"' : ''}>${ic('help')}<span>How to</span></button>
       </nav>
       <div class="appbar-end">
@@ -1757,7 +1827,7 @@ function render() {
       </div>
     </header>
     <div class="shop-body">
-      ${rateBoard()}
+      ${state.view === 'today' ? '' : rateBoard()}
       <main class="stage" ${enter ? 'data-enter' : ''}>
         ${planBanner}
         ${outdated}
@@ -2554,6 +2624,16 @@ function bind() {
     paidInput.addEventListener('input', () => { paidInput.dataset.touched = '1'; });
     amountInput.addEventListener('input', () => { if (!paidInput.dataset.touched) paidInput.value = amountInput.value; });
   }
+  for (const btn of root.querySelectorAll('[data-ins]')) {
+    btn.onclick = () => {
+      if (btn.dataset.ins === 'reset') state.ins = { ...state.ins, metal: '', category: '', customerId: '' };
+      else state.ins = { ...state.ins, [btn.dataset.ins]: btn.dataset.value };
+      render();
+    };
+  }
+  for (const sel of root.querySelectorAll('select[data-ins-select]')) {
+    sel.onchange = () => { state.ins = { ...state.ins, [sel.dataset.insSelect]: sel.value }; render(); };
+  }
   for (const input of root.querySelectorAll('input[data-range]')) {
     input.onchange = () => {
       state.reportPreset = 'custom';
@@ -2860,6 +2940,7 @@ async function submitForm(event) {
         rateInrPerGram: data.rateInrPerGram === '' ? '' : Number(data.rateInrPerGram),
         status: data.status || 'ACTIVE'
       }, isNew);
+      if (!isNew && state.editing && Number(state.editing.rateInrPerGram || 0) === Number(row.rateInrPerGram || 0)) row.updatedAt = state.editing.updatedAt || '';
       state.metalMaster = upsertById(state.metalMaster, row);
       markDirty('metalMaster', id);
     }
@@ -3001,7 +3082,7 @@ async function enterUnlocked() {
   loadSavedRates();
   loadRates();
   const cache = readCache();
-  if (cache) applyLoaded(cache);
+  if (cache) { applyLoaded(cache); clearDemoBoardRates(); }
   else {
     state.unlocked = true;
     refreshSummary();

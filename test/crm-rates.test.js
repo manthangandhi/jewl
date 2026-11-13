@@ -74,13 +74,14 @@ test('rupees per gram come from the ounce price, the dollar rate, purity and the
 });
 
 test('a board rate typed by the owner beats the live rate', () => {
-  const snapshot = { gold: 3100, silver: 40, platinum: 1500, usdInr: 90 };
-  const master = [{ metalType: 'GOLD', purity: '22K', rateInrPerGram: 7000, status: 'ACTIVE' }, { metalType: 'GOLD', purity: '18K', rateInrPerGram: '', status: 'ACTIVE' }];
+  const snapshot = { gold: 3100, silver: 40, platinum: 1500, usdInr: 90, fetchedAt: Date.now() };
+  const master = [{ metalType: 'GOLD', purity: '22K', rateInrPerGram: 7000, status: 'ACTIVE', updatedAt: new Date().toISOString() }, { metalType: 'GOLD', purity: '18K', rateInrPerGram: '', status: 'ACTIVE' }];
   assert.deepEqual(effectiveRate({ master, snapshot }, 'GOLD', '22K'), { perGram: 7000, source: 'board' });
   const live = effectiveRate({ master, snapshot }, 'GOLD', '18K');
   assert.equal(live.source, 'live');
   assert.ok(live.perGram > 0);
   assert.deepEqual(effectiveRate({ master, snapshot: null }, 'GOLD', '18K'), { perGram: 0, source: 'none' });
+  assert.equal(effectiveRate({ master, snapshot: { ...snapshot, fetchedAt: Date.now() - 8 * 3600000 } }, 'GOLD', '18K').source, 'old');
   assert.equal(suggestedAmount(10, 7000), 70000);
   assert.equal(suggestedAmount('', 7000), 0);
 });
