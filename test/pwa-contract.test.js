@@ -222,7 +222,7 @@ test('the About page carries the disclaimer, privacy and support details and is 
   assert.match(about, /not investment advice/);
   assert.match(about, /gold-api\.com/);
   const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
-  assert.equal((js.match(/href="\.\/about\.html"/g) || []).length, 2); // lock screen and Sheet page
+  assert.ok((js.match(/href="\.\/about\.html"/g) || []).length >= 2); // sign-in screens and the Sheet page
   const sw = fs.readFileSync(path.join(pwa, 'service-worker.js'), 'utf8');
   assert.match(sw, /about\.html/);
 });
@@ -231,4 +231,34 @@ test('the shop name in the header may wrap to two lines instead of being cut off
   const css = fs.readFileSync(path.join(pwa, 'styles.css'), 'utf8');
   assert.match(css, /\.appbar \.brand span:last-child \{[^}]*-webkit-line-clamp: 2/);
   assert.match(css, /\.appbar-end \{ flex: 0 0 auto; \}/);
+});
+
+test('the sign-in screens share one branded split layout with icons, and the PIN keeps the native keyboard', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /class="lock-hero"/);
+  assert.match(js, /class="lock-panel"/);
+  assert.match(js, /id="show-pin" aria-pressed="false"/);
+  assert.match(js, /ic\('lock'\)\}<span>Unlock<\/span>/);
+  assert.match(js, /name="shopLock" class="pin-entry" type="password" inputmode="numeric"/);
+  assert.equal((js.match(/<div class="brand"><span class="brand-mark">/g) || []).length, 2); // the sign-in hero and the app header
+});
+
+test('Today fills the page with the CRM widgets and person pages put the ledger beside the details', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  for (const cls of ['glance', 'w-follow', 'w-dates', 'w-collect', 'w-pay', 'w-rates']) assert.match(js, new RegExp(cls));
+  assert.equal((js.match(/class="detail-grid"/g) || []).length, 2);
+  assert.match(js, /crm\.quick/);
+  assert.match(js, /crm\.details/);
+  const css = fs.readFileSync(path.join(pwa, 'styles.css'), 'utf8');
+  assert.match(css, /\.detail-grid \{ grid-template-columns: minmax\(0, 1fr\) 340px/);
+});
+
+test('buttons, chips and the add button carry an icon beside the label', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.doesNotMatch(js, />Save<\/button>/);
+  assert.match(js, /ic\('check'\)\}<span>Save<\/span>/);
+  assert.match(js, /ic\('trash'\)\}<span>Delete/);
+  assert.match(js, /ic\('plus'\)\}<span>Add customer<\/span>/);
+  assert.match(js, /ic\('plus'\)\}<span>Add supplier<\/span>/);
+  assert.match(js, /\[\['all', 'All', 'list'\], \['owe', LABEL\.weGet, 'rupee'\], \['vip', 'VIP', 'star'\], \['follow', 'Follow-up', 'bell'\]\]/);
 });

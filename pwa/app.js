@@ -26,6 +26,7 @@ const PIN_FP_KEY = 'karigar.pinFp';
 const SESSION_UNLOCK_KEY = 'karigar.sessionUnlock';
 const TOUR_KEY = 'karigar.tourDone';
 const TEXT_KEY = 'karigar.bigText';
+const SHOP_NAME_KEY = 'karigar.shopName';
 const LICENSE_KEY_STORE = 'karigar.licenseKey';
 const RATES_KEY = 'karigar.liveRates';
 const PREMIUM_KEY = 'karigar.ratePremium';
@@ -114,6 +115,20 @@ function ic(name) {
     phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
     chat: '<path d="M4 5h16v11H9l-5 4z"/>',
     mail: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 7l9 6 9-6"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    download: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
+    star: '<path d="M12 4l2.4 5 5.6.7-4.1 3.9 1 5.4L12 16.3 7.1 19l1-5.4L4 9.7 9.6 9z"/>',
+    list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+    text: '<path d="M3 18l5-12 5 12M5 14h6M15 18l3-7 3 7M16 16h4"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+    shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    gift: '<rect x="4" y="9" width="16" height="11"/><path d="M12 9v11M3 9h18M12 9c-2-4-6-4-5-1.5C8 9 12 9 12 9zM12 9c2-4 6-4 5-1.5C16 9 12 9 12 9z"/>',
+    eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
     gem: '<path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9 4l-1 5 4 11M15 4l1 5-4 11"/>',
     sold: '<path d="M6 8h12l1 12H5z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
     returned: '<path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/>',
@@ -260,6 +275,7 @@ function applyLoaded(data) {
   state.needsDedupeSave = before !== after;
   state.meta = cleaned.meta;
   state.shopName = data.shopName || cleaned.meta?.shopName || state.shopName;
+  try { if (state.shopName) localStorage.setItem(SHOP_NAME_KEY, state.shopName); } catch { /* ignore */ }
   state.suppliers = cleaned.suppliers;
   state.money = cleaned.money;
   state.metal = cleaned.metal;
@@ -589,26 +605,40 @@ function landing() {
 }
 
 function onboardShell(inner) {
-  root.innerHTML = `<main class="lock-app" tabindex="-1"><section class="onboard-card">${inner}</section></main>`;
+  const points = [
+    ['customers', 'Suppliers and customers, one card each'],
+    ['gem', 'Live gold, silver and platinum rates'],
+    ['bell', 'Follow-ups, birthdays and notes'],
+    ['camera', 'Photos of every sale and return'],
+    ['shield', 'Your books stay in your own Google account']
+  ];
+  root.innerHTML = `<main class="lock-app" tabindex="-1">
+    <section class="lock-hero">
+      <div class="brand"><span class="brand-mark">${ic('gem')}</span><span>Karigar</span></div>
+      <h2>Your shop’s books, kept in your own Google Sheet.</h2>
+      <ul class="lock-points">${points.map(([icon, text]) => `<li>${ic(icon)}<span>${text}</span></li>`).join('')}</ul>
+    </section>
+    <section class="lock-panel"><div class="onboard-card">${inner}</div></section>
+  </main>`;
   bind();
 }
 
 function gateChoice() {
   onboardShell(`
-    <div class="brand"><span class="brand-mark">${ic('gem')}</span> Karigar</div>
-    <h1>Your Sheet.<br>This counter.</h1>
-    <p>Karigar, supplier, cash and metal — one name, one khata. Books stay in the shop’s Google Sheet.</p>
+    <h1>Welcome</h1>
+    <p>Suppliers, customers, cash and metal, with one card for each person. Everything is saved in the shop’s Google Sheet.</p>
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
     <div class="choice-stack">
       <button type="button" class="choice-card" data-action="gate" data-gate="setup">
-        <strong>New shop</strong>
-        <span>One-time setup on your Google Sheet</span>
+        <span class="choice-ic">${ic('plus')}</span>
+        <span><strong>New shop</strong><span>One-time setup with your Google Sheet</span></span>
       </button>
       <button type="button" class="choice-card" data-action="gate" data-gate="login">
-        <strong>Open shop</strong>
-        <span>Unlock with PIN</span>
+        <span class="choice-ic">${ic('key')}</span>
+        <span><strong>Open my shop</strong><span>Unlock with your PIN</span></span>
       </button>
     </div>
+    <p class="setup-toggle"><a class="btn-plain" href="./about.html" target="_blank" rel="noopener">${ic('shield')}<span>About and support</span></a></p>
   `);
 }
 
@@ -630,7 +660,7 @@ function setupWizard() {
         <label>Shop name<input name="shopName" required value="${esc(d.shopName)}" placeholder="e.g. Mehta Jewellers"></label>
         <label>Shop PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" required minlength="4" value="${esc(d.pin)}" placeholder="4 or more digits"></label>
         <label>Type PIN again<input name="pin2" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" required value="${esc(d.pin)}"></label>
-        <button class="btn btn-primary">Continue</button>
+        <button class="btn btn-primary"><span>Continue</span>${ic('chevron')}</button>
       </form>`;
   } else if (state.setupStep === 2) {
     body = `
@@ -640,7 +670,7 @@ function setupWizard() {
       ${err}
       <form id="setup-license">
         <label>License key<input name="licenseKey" required value="${esc(d.licenseKey)}" placeholder="The key they WhatsApp you"></label>
-        <button class="btn btn-primary">Continue</button>
+        <button class="btn btn-primary"><span>Continue</span>${ic('chevron')}</button>
       </form>`;
   } else if (state.setupStep === 3) {
     body = `
@@ -655,7 +685,7 @@ function setupWizard() {
       </ol>
       <form id="setup-sheet">
         <label>Sheet link<input name="sheetUrl" required value="${esc(d.sheetUrl)}" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
-        <button class="btn btn-primary">Continue</button>
+        <button class="btn btn-primary"><span>Continue</span>${ic('chevron')}</button>
       </form>`;
   } else if (state.setupStep === 4) {
     body = `
@@ -689,34 +719,38 @@ function setupWizard() {
       </form>`;
   }
   onboardShell(`
-    <div class="brand"><span class="brand-mark">${ic('gem')}</span> Karigar</div>
     ${setupDots()}
     ${body}
-    <p class="setup-toggle"><button type="button" class="btn-plain" data-action="setup-back">Back</button></p>
+    <p class="setup-toggle"><button type="button" class="btn-plain" data-action="setup-back">${ic('chevron')}<span>Back</span></button></p>
   `);
 }
 
 function loginScreen() {
   const configured = Boolean(state.sheetsUrl);
   const askUrl = !configured || state.setupOpen;
+  let shop = '';
+  try { shop = localStorage.getItem(SHOP_NAME_KEY) || ''; } catch { /* ignore */ }
   onboardShell(`
-    <div class="brand"><span class="brand-mark">${ic('gem')}</span> Karigar</div>
-    <h1>Unlock</h1>
-    ${configured ? '<p class="pin-hint">Type your shop PIN. Your phone or computer keyboard will open.</p>' : '<p>Paste the shop /exec URL, then PIN.</p>'}
+    <h1>${shop ? 'Welcome back' : 'Unlock'}</h1>
+    ${shop ? `<p class="shop-hello">${esc(shop)}</p>` : ''}
+    ${configured ? '<p class="pin-hint">Type your shop PIN. Your phone or computer keyboard will open.</p>' : '<p>Paste the shop /exec URL, then type the PIN.</p>'}
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
     <form id="login-form" autocomplete="on">
       <input class="autofill-trap" type="text" name="username" autocomplete="username" tabindex="-1" aria-hidden="true" value="karigar-shop">
       ${askUrl ? `<label>Web app URL (/exec)<input name="sheetsUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" ${configured ? '' : 'required'} value="${esc(state.sheetsUrl)}" autocomplete="off"></label>` : ''}
       <label class="pin-label">Shop PIN
-        <input name="shopLock" class="pin-entry" type="password" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="current-password" minlength="4" required ${askUrl ? '' : 'autofocus'} autocapitalize="off" spellcheck="false">
+        <span class="pin-wrap">
+          <span class="pin-ic">${ic('key')}</span>
+          <input name="shopLock" class="pin-entry" type="password" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="current-password" minlength="4" required ${askUrl ? '' : 'autofocus'} autocapitalize="off" spellcheck="false">
+          <button type="button" class="pin-eye" id="show-pin" aria-pressed="false" aria-label="Show PIN">${ic('eye')}</button>
+        </span>
       </label>
-      <label class="check-row"><input type="checkbox" id="show-pin"> <span>Show PIN</span></label>
-      <button class="btn btn-primary btn-block" id="login-submit">Unlock</button>
+      <button class="btn btn-primary btn-block" id="login-submit">${ic('lock')}<span>Unlock</span></button>
     </form>
     <p class="setup-toggle">
-      ${configured ? `<button type="button" class="btn-plain" data-action="setup">Use a different Sheet</button>` : ''}
-      <button type="button" class="btn-plain" data-action="gate" data-gate="setup">New shop</button>
-      <a class="btn-plain" href="./about.html" target="_blank" rel="noopener">About and support</a>
+      ${configured ? `<button type="button" class="btn-plain" data-action="setup">${ic('sheet')}<span>Use a different Sheet</span></button>` : ''}
+      <button type="button" class="btn-plain" data-action="gate" data-gate="setup">${ic('plus')}<span>New shop</span></button>
+      <a class="btn-plain" href="./about.html" target="_blank" rel="noopener">${ic('shield')}<span>About and support</span></a>
     </p>
   `);
 }
@@ -746,20 +780,24 @@ function ratesCard() {
   const rows = rateRows();
   const age = state.rates ? describeAge(state.rates.fetchedAt) : '';
   const status = state.ratesLoading ? 'Updating…' : state.ratesError ? state.ratesError : age ? `Live, updated ${age}` : '';
+  const any = rows.some((r) => r.perGram > 0);
   return `<section class="list-card rates-card" id="rates-card">
-    <div class="list-head"><span>Today’s rates</span><button type="button" class="btn-plain" data-action="refresh-rates" ${state.ratesLoading ? 'disabled' : ''}>${ic('refresh')}<span>Refresh rates</span></button></div>
+    <div class="list-head"><span class="head-title">${ic('gem')}<span>Today’s rates</span></span><button type="button" class="btn-plain" data-action="refresh-rates" ${state.ratesLoading ? 'disabled' : ''}>${ic('refresh')}<span>Refresh rates</span></button></div>
     ${status ? `<p class="rates-status ${state.ratesError ? 'bad' : ''}" role="status">${esc(status)}</p>` : ''}
-    ${rows.length && rows.some((r) => r.perGram > 0) ? `<ul class="rate-list">${rows.map((r) => `<li data-metal="${esc(r.row.metalType)}">
+    ${any ? `<ul class="rate-tiles">${rows.filter((r) => r.perGram > 0).map((r) => `<li data-metal="${esc(r.row.metalType)}">
       <span class="rate-name">${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</span>
-      <span class="rate-src">${r.source === 'board' ? 'Your board rate' : r.source === 'live' ? 'Live' : ''}</span>
-      <strong>${r.perGram ? `${money(r.perGram)}<small>per gram</small>` : 'No rate yet'}</strong>
-    </li>`).join('')}</ul>` : `<p class="lede">${rows.length ? (state.ratesLoading ? 'Fetching today’s rates…' : 'Rates will show here as soon as the internet is back. You can also type a board rate for each metal on the Metals page.') : 'Add a metal under Metals to see its rate here.'}</p>`}
-    <form class="premium-row" id="premium-form">
-      <label>Add to the international price (percent)
-        <input name="premium" type="number" step="0.1" inputmode="decimal" value="${esc(state.premiumPct || '')}" placeholder="0">
-      </label>
-      <p class="hint">Live rates are the international price turned into rupees. Indian board rates usually run a few percent higher because of duty and tax. Add that difference here, or type your own board rate on the Metals page, which always wins.</p>
-    </form>
+      <strong>${money(r.perGram)}</strong>
+      <span class="rate-src">per gram${r.source === 'board' ? ', your board rate' : ''}</span>
+    </li>`).join('')}</ul>` : `<p class="lede rates-empty">${rows.length ? (state.ratesLoading ? 'Fetching today’s rates…' : 'Rates will show here as soon as the internet is back. You can also type a board rate for each metal on the Metals page.') : 'Add a metal under Metals to see its rate here.'}</p>`}
+    <details class="adjust">
+      <summary>${ic('edit')}<span>Adjust for your market</span></summary>
+      <form class="premium-row" id="premium-form">
+        <label>Add to the international price (percent)
+          <input name="premium" type="number" step="0.1" inputmode="decimal" value="${esc(state.premiumPct || '')}" placeholder="0">
+        </label>
+        <p class="hint">Live rates are the international price turned into rupees. Indian board rates usually run a few percent higher because of duty and tax. Add that difference here, or type your own board rate on the Metals page, which always wins.</p>
+      </form>
+    </details>
   </section>`;
 }
 
@@ -916,7 +954,7 @@ function customersHome() {
         <div class="filter-row">
           <div class="search-bar">${ic('search')}<input class="search" data-scope="customer" name="search" value="${esc(state.customerSearch)}" placeholder="Search customers" aria-label="Search customers"></div>
           <div class="chips">
-            ${[['all', 'All'], ['owe', LABEL.weGet], ['vip', 'VIP'], ['follow', 'Follow-up']].map(([id, label]) => `<button type="button" class="chip ${state.customerFilter === id ? 'on' : ''}" data-action="customer-filter" data-filter="${id}">${label}</button>`).join('')}
+            ${[['all', 'All', 'list'], ['owe', LABEL.weGet, 'rupee'], ['vip', 'VIP', 'star'], ['follow', 'Follow-up', 'bell']].map(([id, label, icon]) => `<button type="button" class="chip ${state.customerFilter === id ? 'on' : ''}" data-action="customer-filter" data-filter="${id}">${ic(icon)}<span>${label}</span></button>`).join('')}
           </div>
         </div>
         ${list}
@@ -936,13 +974,14 @@ function customersHome() {
           </li>`).join('') || '<li class="empty-in">No sales this month</li>'}</ol>
       </aside>
     </div>
-    <button class="fab" data-action="modal" data-modal="customer" type="button" aria-label="Add customer">+</button>`;
+    <button class="fab" data-action="modal" data-modal="customer" type="button">${ic('plus')}<span>Add customer</span></button>`;
 }
 
 function customerPassbook() {
   const detail = state.customerDetail;
   if (!detail?.customer) return '<div class="empty-khata">Customer not found.</div>';
   const t = customerTone(detail.balance);
+  const crm = crmPanel('customer', detail.customer, detail.balance);
   const lines = detail.passbook || [];
   return `
     <div class="desk-col fill">
@@ -956,7 +995,7 @@ function customerPassbook() {
         </div>
       </div>
       <div class="party-tools">
-        <button class="btn-plain" data-edit="customer" data-id="${esc(detail.customer.id)}" type="button">Edit</button>
+        <button class="btn-plain" data-edit="customer" data-id="${esc(detail.customer.id)}" type="button">${ic('edit')}<span>Edit</span></button>
       </div>
     </header>
     <section class="balance-hero tight">
@@ -964,9 +1003,10 @@ function customerPassbook() {
       <div class="bh"><span>Bought (net metal)</span><div>${metalPills(detail.metalNet) || '<strong>—</strong>'}</div></div>
     </section>
     ${saleActions()}
-    ${crmPanel('customer', detail.customer, detail.balance)}
+    ${crm.quick}
+    <div class="detail-grid">
     <section class="list-card blotter grow">
-      <div class="list-head"><span>Sales, returns and payments</span><span>${lines.length}</span></div>
+      <div class="list-head"><span class="head-title">${ic('list')}<span>Sales, returns and payments</span></span><span>${lines.length}</span></div>
       ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
         <li class="cell clickable" data-edit="sale" data-id="${esc(line.id)}">
           <time class="pass-date">${esc(fmtDate(line.date))}</time>
@@ -978,8 +1018,10 @@ function customerPassbook() {
             <b class="${line.kind === 'return' ? 'owe' : 'collect'}">${money(line.amountInr)}</b>
             <em class="hisab"><span>Paid ${money(line.paidInr)}</span><span>Balance ${money(line.runningInr)}</span></em>
           </span>
-        </li>`).join('')}</ol>` : '<div class="empty-in">Nothing yet. Tap Sale when this customer buys.</div>'}
+        </li>`).join('')}</ol>` : `<div class="empty-in">${ic('sold')}<span>Nothing yet. Tap Sale when this customer buys.</span></div>`}
     </section>
+    ${crm.details}
+    </div>
     </div>`;
 }
 
@@ -1047,18 +1089,21 @@ function crmPanel(kind, party, owesUs = 0) {
       <button type="button" class="btn btn-soft" data-action="followup-done" data-kind="${kind}" data-id="${esc(party.id)}">Done</button>
     </div>` : '';
   const notes = notesFor(state.interactions, party.id);
-  return `<section class="crm" aria-label="Contact and notes">
+  const quick = (buttons || follow) ? `<section class="crm-quick" aria-label="Contact">
     ${buttons ? `<div class="contact-row">${buttons}</div>` : ''}
     ${follow}
-    ${facts ? `<dl class="facts">${facts}</dl>` : ''}
+  </section>` : '';
+  const details = `<aside class="crm-details" aria-label="Details and notes">
+    ${facts ? `<section class="list-card"><div class="list-head"><span class="head-title">${ic('info')}<span>Details</span></span></div><dl class="facts">${facts}</dl></section>` : ''}
     <section class="list-card notes">
-      <div class="list-head"><span>Notes and calls</span><button type="button" class="btn-plain" data-action="add-note" data-kind="${kind}" data-id="${esc(party.id)}">+ Add note</button></div>
+      <div class="list-head"><span class="head-title">${ic('chat')}<span>Notes and calls</span></span><button type="button" class="btn-plain" data-action="add-note" data-kind="${kind}" data-id="${esc(party.id)}">${ic('plus')}<span>Add note</span></button></div>
       ${notes.length ? `<ol class="note-list">${notes.map((n) => `<li class="cell clickable" data-edit="interaction" data-id="${esc(n.id)}">
         <time class="pass-date">${esc(fmtDate(n.date))}</time>
         <span class="cell-main"><strong>${esc(n.kind || 'Note')}</strong><small>${esc(n.text || '')}</small></span>
-      </li>`).join('')}</ol>` : '<div class="empty-in">No notes yet. Write down what was said, so you remember next time.</div>'}
+      </li>`).join('')}</ol>` : `<div class="empty-in">${ic('chat')}<span>No notes yet. Write down what was said, so you remember next time.</span></div>`}
     </section>
-  </section>`;
+  </aside>`;
+  return { quick, details };
 }
 
 function fmtLong(v) {
@@ -1078,21 +1123,30 @@ function todayView() {
   const dates = upcomingDates(state.customers, t, 7);
   const collect = (state.custSummary?.byCustomer || []).filter((r) => r.balance > 0).sort((a, b) => b.balance - a.balance).slice(0, 5);
   const pay = (state.summary?.bySupplier || []).filter((r) => r.payable > 0).sort((a, b) => b.payable - a.payable).slice(0, 5);
+  const month = salesPeriodTotals(state.sales, rangeForPreset('month'));
   const link = (kind, id) => (kind === 'customer' ? `data-customer="${esc(id)}"` : `data-supplier="${esc(id)}"`);
-  const empty = (text) => `<div class="empty-in">${text}</div>`;
+  const empty = (icon, text) => `<div class="empty-in">${ic(icon)}<span>${text}</span></div>`;
+  const head = (icon, title, count) => `<div class="list-head"><span class="head-title">${ic(icon)}<span>${title}</span></span><span>${count}</span></div>`;
+  const todayCount = follow.filter((f) => f.days <= 0).length;
+  const stat = (icon, label, figure, tone = '') => `<div class="stat ${tone}"><span class="stat-ic">${ic(icon)}</span><span class="stat-text"><span>${label}</span><strong>${figure}</strong></span></div>`;
   return `
     <div class="today">
-      <div class="today-rates">${ratesCard()}</div>
-      <section class="list-card">
-        <div class="list-head"><span>Follow-ups</span><span>${follow.length}</span></div>
+      <section class="glance" aria-label="At a glance">
+        ${stat('in', LABEL.weGet, money(state.custSummary?.customersOweInr || 0), 'collect')}
+        ${stat('out', LABEL.weGive, money(state.summary?.weOweInr || 0), 'owe')}
+        ${stat('sold', 'Sales this month', money(month.soldInr))}
+        ${stat('bell', 'To follow up', String(todayCount))}
+      </section>
+      <section class="list-card w-follow">
+        ${head('bell', 'Follow-ups', follow.length)}
         ${follow.length ? `<ul class="plain-list">${follow.map(({ party, days }) => `<li><button type="button" class="cell" ${link(party._kind, party.id)}>
           ${avatar(party.name)}
           <span class="cell-main"><strong>${esc(party.name)}</strong><small>${esc(party.followUpNote || (party._kind === 'customer' ? 'Customer' : 'Supplier'))}</small></span>
           <span class="cell-trail ${days < 0 ? 'owe' : ''}"><b>${esc(whenLabel(days))}</b></span>
-        </button></li>`).join('')}</ul>` : empty('Nobody to follow up with. Add a follow-up date on a customer or supplier.')}
+        </button></li>`).join('')}</ul>` : empty('bell', 'Nobody to follow up with. Add a follow-up date on a customer or supplier.')}
       </section>
-      <section class="list-card">
-        <div class="list-head"><span>Birthdays and anniversaries</span><span>${dates.length}</span></div>
+      <section class="list-card w-dates">
+        ${head('gift', 'Birthdays and anniversaries', dates.length)}
         ${dates.length ? `<ul class="plain-list">${dates.map((d) => {
     const wa = whatsappLink(d.customer.phone, wishText(d.customer, d.label));
     return `<li class="cell">
@@ -1102,20 +1156,21 @@ function todayView() {
           </button>
           ${wa ? `<a class="btn btn-soft" href="${esc(wa)}" target="_blank" rel="noopener">${ic('chat')}<span>Wish</span></a>` : ''}
         </li>`;
-  }).join('')}</ul>` : empty('No birthdays or anniversaries in the next 7 days.')}
+  }).join('')}</ul>` : empty('gift', 'No birthdays or anniversaries in the next 7 days.')}
       </section>
-      <section class="list-card">
-        <div class="list-head"><span>${LABEL.weGet}, customers</span><span>${money((state.custSummary?.customersOweInr) || 0)}</span></div>
+      <section class="list-card w-collect">
+        ${head('in', `${LABEL.weGet}, customers`, money(state.custSummary?.customersOweInr || 0))}
         ${collect.length ? `<ul class="plain-list">${collect.map((r) => `<li><button type="button" class="cell" data-customer="${esc(r.id)}">
           ${avatar(r.name)}<span class="cell-main"><strong>${esc(r.name)}</strong><small>${r.lastDate ? `Last entry ${esc(fmtDate(r.lastDate))}` : ''}</small></span>
-          <span class="cell-trail collect"><b>${money(r.balance)}</b></span></button></li>`).join('')}</ul>` : empty('No customer owes you anything.')}
+          <span class="cell-trail collect"><b>${money(r.balance)}</b></span></button></li>`).join('')}</ul>` : empty('check', 'No customer owes you anything.')}
       </section>
-      <section class="list-card">
-        <div class="list-head"><span>${LABEL.weGive}, suppliers</span><span>${money((state.summary?.weOweInr) || 0)}</span></div>
+      <section class="list-card w-pay">
+        ${head('out', `${LABEL.weGive}, suppliers`, money(state.summary?.weOweInr || 0))}
         ${pay.length ? `<ul class="plain-list">${pay.map((r) => `<li><button type="button" class="cell" data-supplier="${esc(r.id)}">
           ${avatar(r.name)}<span class="cell-main"><strong>${esc(r.name)}</strong></span>
-          <span class="cell-trail owe"><b>${money(r.payable)}</b></span></button></li>`).join('')}</ul>` : empty('You do not owe any supplier.')}
+          <span class="cell-trail owe"><b>${money(r.payable)}</b></span></button></li>`).join('')}</ul>` : empty('check', 'You do not owe any supplier.')}
       </section>
+      <div class="w-rates">${ratesCard()}</div>
     </div>`;
 }
 
@@ -1159,9 +1214,9 @@ function partiesHome() {
         <div class="filter-row">
           <div class="search-bar">${ic('search')}<input class="search" name="search" value="${esc(state.search)}" placeholder="Search suppliers" aria-label="Search suppliers"></div>
           <div class="chips">
-            <button type="button" class="chip ${state.partyFilter === 'all' ? 'on' : ''}" data-action="party-filter" data-filter="all">All</button>
-            <button type="button" class="chip ${state.partyFilter === 'owe' ? 'on' : ''}" data-action="party-filter" data-filter="owe">${LABEL.weGive}</button>
-            <button type="button" class="chip ${state.partyFilter === 'collect' ? 'on' : ''}" data-action="party-filter" data-filter="collect">${LABEL.weGet}</button>
+            <button type="button" class="chip ${state.partyFilter === 'all' ? 'on' : ''}" data-action="party-filter" data-filter="all">${ic('list')}<span>All</span></button>
+            <button type="button" class="chip ${state.partyFilter === 'owe' ? 'on' : ''}" data-action="party-filter" data-filter="owe">${ic('out')}<span>${LABEL.weGive}</span></button>
+            <button type="button" class="chip ${state.partyFilter === 'collect' ? 'on' : ''}" data-action="party-filter" data-filter="collect">${ic('in')}<span>${LABEL.weGet}</span></button>
           </div>
         </div>
         ${list}
@@ -1181,7 +1236,7 @@ function partiesHome() {
           </li>`).join('') || '<li class="empty-in">No entries this month</li>'}</ol>
       </aside>
     </div>
-    <button class="fab" data-action="modal" data-modal="supplier" type="button" aria-label="Add supplier">+</button>`;
+    <button class="fab" data-action="modal" data-modal="supplier" type="button">${ic('plus')}<span>Add supplier</span></button>`;
 }
 
 function supplierPassbook() {
@@ -1189,6 +1244,7 @@ function supplierPassbook() {
   if (!detail?.supplier) return '<div class="empty-khata">Supplier not found.</div>';
   const dir = moneyDirection(detail.payable);
   const lines = detail.passbook || [];
+  const crm = crmPanel('supplier', detail.supplier);
   return `
     <div class="desk-col fill">
     <header class="party-head">
@@ -1203,7 +1259,7 @@ function supplierPassbook() {
       <div class="party-tools">
         <button class="btn-plain" data-action="print-party" type="button">${ic('print')}<span>Print</span></button>
         <button class="btn btn-primary party-share" data-action="share-party" type="button">${ic('share')}<span>Share PDF</span></button>
-        <button class="btn-plain" data-edit="supplier" data-id="${esc(detail.supplier.id)}" type="button">Edit</button>
+        <button class="btn-plain" data-edit="supplier" data-id="${esc(detail.supplier.id)}" type="button">${ic('edit')}<span>Edit</span></button>
       </div>
     </header>
     <section class="balance-hero tight">
@@ -1211,10 +1267,11 @@ function supplierPassbook() {
       <div class="bh"><span>Metal with supplier</span><div>${metalPills(detail.metalByPurity) || '<strong>—</strong>'}</div></div>
     </section>
     ${recordActions()}
-    <button class="text-link" data-action="modal" data-modal="settle" type="button">Settle account</button>
-    ${crmPanel('supplier', detail.supplier)}
+    <div class="settle-row"><button class="btn btn-soft" data-action="modal" data-modal="settle" type="button">${ic('check')}<span>Settle account</span></button></div>
+    ${crm.quick}
+    <div class="detail-grid">
     <section class="list-card blotter grow">
-      <div class="list-head"><span>Running hisab</span></div>
+      <div class="list-head"><span class="head-title">${ic('list')}<span>Running hisab</span></span><span>${lines.length}</span></div>
       ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
         <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
           <time class="pass-date">${esc(fmtDate(line.date))}</time>
@@ -1226,8 +1283,10 @@ function supplierPassbook() {
             <b class="${line.amountInr < 0 ? 'collect' : line.amountInr > 0 ? 'owe' : ''}">${line.kind === 'metal' ? grams(line.grams) : money(Math.abs(line.amountInr))}${line.kind === 'settle' && line.grams ? ` · ${grams(line.grams)}` : ''}</b>
             <em class="hisab">Hisab ${money(line.runningInr)}</em>
           </span>
-        </li>`).join('')}</ol>` : '<div class="empty-in">No entries</div>'}
+        </li>`).join('')}</ol>` : `<div class="empty-in">${ic('list')}<span>No entries yet. Tap Purchase or Payment above.</span></div>`}
     </section>
+    ${crm.details}
+    </div>
     </div>`;
 }
 
@@ -1279,8 +1338,8 @@ function reportView() {
         <label>To<input type="date" data-range="reportTo" value="${esc(range.to)}"></label>
       </div>` : ''}
       <div class="report-tools">
-        <button type="button" class="btn btn-soft" data-action="export-report">Export CSV</button>
-        <button type="button" class="btn btn-primary" data-action="print-report">Print</button>
+        <button type="button" class="btn btn-soft" data-action="export-report">${ic('download')}<span>Export CSV</span></button>
+        <button type="button" class="btn btn-primary" data-action="print-report">${ic('print')}<span>Print</span></button>
       </div>
     </div>
     <section class="metric-grid">
@@ -1349,36 +1408,36 @@ function booksView() {
         <section class="list-card">
           <div class="list-head"><span>This shop</span></div>
           <button class="cell" data-view="masters" type="button">
-            <span class="cell-main"><strong>Metals and categories</strong><small>Gold, silver, purity, chains, rings…</small></span>
+            <span class="cell-ic">${ic('masters')}</span><span class="cell-main"><strong>Metals and categories</strong><small>Gold, silver, purity, chains, rings…</small></span>
             ${ic('chevron')}
           </button>
           <button class="cell" data-action="modal" data-modal="updateSheet" type="button">
-            <span class="cell-main"><strong>Update my Google Sheet</strong><small>One-time, guided — needed for customers and photos</small></span>
+            <span class="cell-ic">${ic('update')}</span><span class="cell-main"><strong>Update my Google Sheet</strong><small>One-time, guided — needed for customers and photos</small></span>
             ${ic('chevron')}
           </button>
           <button class="cell" data-view="help" type="button">
-            <span class="cell-main"><strong>How this works</strong><small>Short help for every screen</small></span>
+            <span class="cell-ic">${ic('help')}</span><span class="cell-main"><strong>How this works</strong><small>Short help for every screen</small></span>
             ${ic('chevron')}
           </button>
           <a class="cell" href="./about.html" target="_blank" rel="noopener">
-            <span class="cell-main"><strong>About, privacy and support</strong><small>Disclaimer, where your data lives, and how to reach us</small></span>
+            <span class="cell-ic">${ic('shield')}</span><span class="cell-main"><strong>About, privacy and support</strong><small>Disclaimer, where your data lives, and how to reach us</small></span>
             ${ic('chevron')}
           </a>
           <button class="cell" data-action="text-size" type="button">
-            <span class="cell-main"><strong>${state.bigText ? 'Normal text size' : 'Bigger text'}</strong><small>Make everything easier to read</small></span>
+            <span class="cell-ic">${ic('text')}</span><span class="cell-main"><strong>${state.bigText ? 'Normal text size' : 'Bigger text'}</strong><small>Make everything easier to read</small></span>
           </button>
           <button class="cell danger" data-action="logout" type="button">
-            <span class="cell-main"><strong>Lock</strong><small>PIN lock this device</small></span>
+            <span class="cell-ic">${ic('lock')}</span><span class="cell-main"><strong>Lock</strong><small>PIN lock this device</small></span>
           </button>
         </section>
         <section class="list-card">
           <div class="list-head"><span>Google Sheet</span></div>
           <button class="cell" data-action="refresh" type="button">
-            <span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : '<small>Reload the Google Sheet. Header Refresh does the same.</small>'}</span>
+            <span class="cell-ic">${ic('refresh')}</span><span class="cell-main"><strong>Refresh data</strong>${savedLine() ? `<small>${esc(savedLine())}</small>` : '<small>Reload the Google Sheet. Header Refresh does the same.</small>'}</span>
             ${ic('chevron')}
           </button>
           ${safeSheetUrl(state.spreadsheetUrl) ? `<a class="cell" href="${esc(safeSheetUrl(state.spreadsheetUrl))}" target="_blank" rel="noopener">
-            <span class="cell-main"><strong>Open in Google Sheets</strong><small>View the live workbook</small></span>
+            <span class="cell-ic">${ic('sheet')}</span><span class="cell-main"><strong>Open in Google Sheets</strong><small>View the live workbook</small></span>
             ${ic('chevron')}
           </a>` : ''}
         </section>
@@ -1387,11 +1446,11 @@ function booksView() {
         <div class="list-head"><span>Demo only</span></div>
         <p class="sheet-warn">Writes into the Sheet, not the app. Do not use on live books.</p>
         <button class="cell" data-action="seed-demo" type="button">
-          <span class="cell-main"><strong>Load demo khata</strong><small>Sample suppliers, customers and sales into this Google Sheet</small></span>
+          <span class="cell-ic">${ic('download')}</span><span class="cell-main"><strong>Load demo khata</strong><small>Sample suppliers, customers and sales into this Google Sheet</small></span>
           ${ic('chevron')}
         </button>
         <button class="cell" data-action="strip-demo" type="button">
-          <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes only the demo suppliers, customers and their entries</small></span>
+          <span class="cell-ic">${ic('trash')}</span><span class="cell-main"><strong>Remove demo khata</strong><small>Deletes only the demo suppliers, customers and their entries</small></span>
           ${ic('chevron')}
         </button>
       </section>
@@ -1482,7 +1541,7 @@ function moreDetails(kind, e) {
 function supplierModal() {
   const e = state.editing || {};
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${e.id ? 'Edit supplier' : 'Add supplier'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${e.id ? 'Edit supplier' : 'Add supplier'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="supplier">
       <label>Supplier name<input name="name" required value="${esc(e.name || '')}" placeholder="Karigar or supplier"></label>
       <label>Phone (optional)<input name="phone" value="${esc(e.phone || '')}"></label>
@@ -1495,9 +1554,9 @@ function supplierModal() {
         <label>Opening metal (grams)<input name="weightGrams" type="number" min="0" step="0.001" value="0"></label>
       `}
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="supplier">Delete supplier</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="supplier">${ic('trash')}<span>Delete supplier</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1526,7 +1585,7 @@ function dealModal(type) {
   const isPay = type === 'PAYMENT';
   const draft = state.dealDraft || {};
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${isPay ? 'Payment' : 'Purchase'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${isPay ? 'Payment' : 'Purchase'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <p class="lede">${isPay ? 'Payment to the supplier. Rupees, metal, or both.' : 'Bill from the supplier. Rupees, metal, or both.'}</p>
     <form id="data-form" data-kind="deal">
       ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Supplier<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${(draft.supplierId || state.supplierId) === s.id ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
@@ -1539,8 +1598,8 @@ function dealModal(type) {
       <label>Date<input name="date" type="date" value="${esc(draft.date || today())}" required></label>
       <label>Note<input name="note" placeholder="Bill no. / optional" value="${esc(draft.note || '')}"></label>
       <div class="form-actions">
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1552,7 +1611,7 @@ function moneyModal(type) {
   const isEdit = Boolean(e.id);
   const current = e.type || type;
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (current === 'PAYMENT' ? 'Payment' : 'Purchase')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (current === 'PAYMENT' ? 'Payment' : 'Purchase')}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="money">
       ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Supplier<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Type<select name="type">
@@ -1564,9 +1623,9 @@ function moneyModal(type) {
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <label>Note<input name="note" value="${esc(e.note || '')}" placeholder="Bill no. / optional"></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="money">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="money">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1578,7 +1637,7 @@ function metalModal(direction) {
   const isEdit = Boolean(e.id);
   const current = e.direction || direction;
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${isEdit ? 'Edit metal entry' : (current === 'RECEIPT' ? LABEL.supplier.metalReceived : LABEL.supplier.metalGiven)}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${isEdit ? 'Edit metal entry' : (current === 'RECEIPT' ? LABEL.supplier.metalReceived : LABEL.supplier.metalGiven)}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="metal">
       ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Supplier<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Direction<select name="direction">
@@ -1593,9 +1652,9 @@ function metalModal(direction) {
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <label>Note<input name="note" value="${esc(e.note || '')}"></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="metal">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="metal">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1605,7 +1664,7 @@ function settleModal() {
   const e = state.editing || {};
   const locked = Boolean(state.supplierId) && !e.id;
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${e.id ? 'Edit settlement' : 'Close account'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${e.id ? 'Edit settlement' : 'Close account'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="settle">
       ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Supplier<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       <label>Cash closed (₹)<input name="moneyAmountInr" type="number" min="0" step="0.01" value="${esc(e.moneyAmountInr || 0)}"></label>
@@ -1615,9 +1674,9 @@ function settleModal() {
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <label>Note<input name="note" value="${esc(e.note || '')}"></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="settle">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="settle">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1626,7 +1685,7 @@ function settleModal() {
 function customerModal() {
   const e = state.editing || {};
   return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${e.id ? 'Edit customer' : 'Add customer'}">
-    <div class="section-head"><h2>${e.id ? 'Edit customer' : 'Add customer'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${e.id ? 'Edit customer' : 'Add customer'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="customer">
       <label>Customer name<input name="name" required autocomplete="off" value="${esc(e.name || '')}" placeholder="Name of the customer"></label>
       <label>Phone (optional)<input name="phone" type="tel" inputmode="tel" autocomplete="off" value="${esc(e.phone || '')}"></label>
@@ -1634,9 +1693,9 @@ function customerModal() {
       <label>Notes (optional)<input name="notes" autocomplete="off" value="${esc(e.notes || '')}"></label>
       ${moreDetails('customer', e)}
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="customer">Delete customer</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="customer">${ic('trash')}<span>Delete customer</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1696,7 +1755,7 @@ function saleModal(modalKind) {
   const paidDefault = isEdit ? (e.paidInr ?? '') : '';
   const customerId = e.customerId || state.customerId || '';
   return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${isReturn ? 'Customer return' : 'Customer sale'}">
-    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isReturn ? 'Return from customer' : 'Sale to customer')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isReturn ? 'Return from customer' : 'Sale to customer')}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="sale">
       ${locked ? `<input type="hidden" name="customerId" value="${esc(state.customerId)}">` : `<label>Customer<select name="customerId" required><option value="">Choose customer…</option>${state.customers.map((c) => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(customerLabel(c))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Type<select name="kind">
@@ -1724,9 +1783,9 @@ function saleModal(modalKind) {
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <label>Note (optional)<input name="note" autocomplete="off" value="${esc(e.note || '')}" placeholder="Bill no. / remark"></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="sale">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="sale">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1735,7 +1794,7 @@ function saleModal(modalKind) {
 function categoryModal() {
   const e = state.editing || {};
   return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${e.id ? 'Edit item type' : 'Add item type'}">
-    <div class="section-head"><h2>${e.id ? 'Edit item type' : 'Add item type'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${e.id ? 'Edit item type' : 'Add item type'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="category">
       <label>Metal<select name="metalType">${metalTypeOptions(e.metalType || 'GOLD')}</select></label>
       <label>Item name<input name="category" required autocomplete="off" value="${esc(e.category || '')}" placeholder="Chain, Ring, Mangalsutra…"></label>
@@ -1744,9 +1803,9 @@ function categoryModal() {
         <option value="INACTIVE" ${e.status === 'INACTIVE' ? 'selected' : ''}>Hidden</option>
       </select></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="category">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="category">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1759,7 +1818,7 @@ function updateSheetModal() {
     ? `<a class="btn btn-soft btn-block" href="${esc(safeSheetUrl(state.spreadsheetUrl))}" target="_blank" rel="noopener">Open my Google Sheet</a>`
     : '';
   return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Update my Google Sheet">
-    <div class="section-head"><h2>Update my Google Sheet</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>Update my Google Sheet</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <p class="lede">Do this once. Your old entries stay safe. Your PIN is filled in for you.</p>
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
     <ol class="steps-big">
@@ -1774,7 +1833,7 @@ function updateSheetModal() {
       <li><strong>Publish</strong><span>Deploy → Manage deployments → pencil → Version: New version → Deploy.</span></li>
       <li><strong>Come back here</strong><span>Tap Refresh data. The yellow note disappears.</span></li>
     </ol>
-    <div class="form-actions"><button type="button" class="btn btn-soft" data-action="close">Close</button></div>
+    <div class="form-actions"><button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Close</span></button></div>
   </section></div>`;
 }
 
@@ -1782,7 +1841,7 @@ function interactionModal() {
   const e = state.editing || {};
   const party = contactParty(e.partyType === 'SUPPLIER' ? 'supplier' : 'customer', e.partyId) || {};
   return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${e.id ? 'Edit note' : 'Add note'}">
-    <div class="section-head"><h2>${e.id ? 'Edit note' : 'Add note'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${e.id ? 'Edit note' : 'Add note'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <p class="lede">${esc(party.name || '')}</p>
     <form id="data-form" data-kind="interaction">
       <input type="hidden" name="partyId" value="${esc(e.partyId || '')}">
@@ -1791,9 +1850,9 @@ function interactionModal() {
       <label>Note<textarea name="text" rows="4" required placeholder="What was said or agreed">${esc(e.text || '')}</textarea></label>
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="interaction">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="interaction">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1805,7 +1864,7 @@ function custPayModal() {
   const locked = Boolean(state.customerId) && !isEdit;
   const customerId = e.customerId || state.customerId || '';
   return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Payment from customer">
-    <div class="section-head"><h2>${isEdit ? 'Edit payment' : 'Payment from customer'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${isEdit ? 'Edit payment' : 'Payment from customer'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <p class="lede">Money the customer paid you. It lowers what they owe.</p>
     <form id="data-form" data-kind="sale">
       <input type="hidden" name="kind" value="PAYMENT">
@@ -1814,9 +1873,9 @@ function custPayModal() {
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <label>Note (optional)<input name="note" autocomplete="off" value="${esc(e.note || '')}" placeholder="Cash, UPI, cheque no."></label>
       <div class="form-actions">
-        ${isEdit ? '<button type="button" class="btn btn-soft" data-delete="sale">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${isEdit ? `<button type="button" class="btn btn-soft" data-delete="sale">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -1842,7 +1901,7 @@ function modal() {
 function metalMasterModal() {
   const e = state.editing || {};
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${e.id ? 'Edit metal' : 'Add metal'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${e.id ? 'Edit metal' : 'Add metal'}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="metalMaster">
       <label>Metal type<input name="metalType" required value="${esc(e.metalType || 'GOLD')}" placeholder="GOLD / SILVER"></label>
       <label>Purity<input name="purity" required value="${esc(e.purity || '')}" placeholder="22K / 999"></label>
@@ -1852,9 +1911,9 @@ function metalMasterModal() {
         <option value="INACTIVE" ${e.status === 'INACTIVE' ? 'selected' : ''}>Inactive</option>
       </select></label>
       <div class="form-actions">
-        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="metalMaster">Delete</button>' : ''}
-        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
-        <button class="btn btn-primary">Save</button>
+        ${e.id ? `<button type="button" class="btn btn-soft" data-delete="metalMaster">${ic('trash')}<span>Delete</span></button>` : ''}
+        <button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Cancel</span></button>
+        <button class="btn btn-primary">${ic('check')}<span>Save</span></button>
       </div>
     </form>
   </section></div>`;
@@ -2125,7 +2184,15 @@ function bind() {
   window.onkeydown = null;
   const pinEntry = root.querySelector('input.pin-entry');
   const showPin = root.querySelector('#show-pin');
-  if (pinEntry && showPin) showPin.onchange = () => { pinEntry.type = showPin.checked ? 'text' : 'password'; pinEntry.focus(); };
+  if (pinEntry && showPin) {
+    showPin.onclick = () => {
+      const show = pinEntry.type === 'password';
+      pinEntry.type = show ? 'text' : 'password';
+      showPin.setAttribute('aria-pressed', String(show));
+      showPin.setAttribute('aria-label', show ? 'Hide PIN' : 'Show PIN');
+      pinEntry.focus();
+    };
+  }
   if (pinEntry && !state.unlocked && !root.querySelector('input[name="sheetsUrl"]') && document.activeElement !== pinEntry) {
     pinEntry.focus({ preventScroll: true });
   }
@@ -2329,7 +2396,7 @@ async function submitForm(event) {
     const id = state.editing?.id || nid();
     requireNewScript(kind);
     const saveBtn = form.querySelector('.form-actions .btn-primary');
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    if (saveBtn) { saveBtn.dataset.html = saveBtn.innerHTML; saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
     let staleSalePhoto = '';
     if (kind === 'supplier') {
       const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', notes: data.notes || '', status: 'ACTIVE', email: String(data.email || '').trim(), address: String(data.address || '').trim(), tag: data.tag || '', followUpDate: data.followUpDate || '', followUpNote: String(data.followUpNote || '').trim(), gstin: String(data.gstin || '').trim() }, isNew);
@@ -2495,7 +2562,7 @@ async function submitForm(event) {
       }
       box.textContent = explainLedgerError(error);
       const btn = form.querySelector('.form-actions .btn-primary');
-      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.html || 'Save'; }
       box.scrollIntoView({ block: 'nearest' });
       return;
     }
