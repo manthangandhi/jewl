@@ -1,4 +1,4 @@
-const CACHE_NAME = 'karigar-shell-v27';
+const CACHE_NAME = 'karigar-shell-v29';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -20,6 +20,12 @@ const CORE_ASSETS = [
   './ledger-math.js',
   './manifest.webmanifest',
   './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './favicon.svg',
+  './favicon-32.png',
+  './apple-touch-icon.png',
+  './about.html',
   './apps-script-url.txt',
   './license-url.txt',
   './karigar-licenses.gs'

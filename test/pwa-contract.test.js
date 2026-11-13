@@ -7,7 +7,7 @@ import { HEADERS } from '../pwa/sheet-model.js';
 const pwa = path.join(process.cwd(), 'pwa');
 
 test('PWA shell files exist for installable Sheets app', () => {
-  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'customer-math.js', 'photo.js', 'tokens.css', 'base.css', 'App.html', 'appsscript.json']) {
+  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'customer-math.js', 'photo.js', 'tokens.css', 'base.css', 'about.html', 'favicon.svg', 'favicon-32.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'App.html', 'appsscript.json']) {
     assert.equal(fs.existsSync(path.join(pwa, file)), true, file);
   }
   const html = fs.readFileSync(path.join(pwa, 'index.html'), 'utf8');
@@ -191,4 +191,44 @@ test('customers, suppliers and metals are named the same way on every screen', (
   assert.doesNotMatch(js, /Add party|No parties yet|Search parties|Edit party|Delete party|Party name/);
   assert.match(js, /Add supplier/);
   assert.match(js, /titleCase\(t\)/);
+});
+
+test('installable icons exist as PNG, the favicon and home-screen icon are wired, and iOS gets a PNG', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(pwa, 'manifest.webmanifest'), 'utf8'));
+  const purposes = manifest.icons.map((i) => `${i.sizes}:${i.purpose}`);
+  assert.ok(purposes.includes('192x192:any'));
+  assert.ok(purposes.includes('512x512:any'));
+  assert.ok(purposes.includes('512x512:maskable'));
+  for (const icon of manifest.icons) assert.equal(fs.existsSync(path.join(pwa, icon.src)), true, icon.src);
+  const png = (file) => fs.readFileSync(path.join(pwa, file));
+  for (const [file, size] of [['icon-192.png', 192], ['icon-512.png', 512], ['icon-maskable-512.png', 512], ['apple-touch-icon.png', 180], ['favicon-32.png', 32]]) {
+    const b = png(file);
+    assert.equal(b.subarray(1, 4).toString(), 'PNG', file);
+    assert.equal(b.readUInt32BE(16), size, `${file} width`);
+    assert.equal(b.readUInt32BE(20), size, `${file} height`);
+  }
+  const html = fs.readFileSync(path.join(pwa, 'index.html'), 'utf8');
+  assert.match(html, /rel="apple-touch-icon" href="\.\/apple-touch-icon\.png"/);
+  assert.match(html, /rel="icon" type="image\/svg\+xml" href="\.\/favicon\.svg"/);
+  assert.doesNotMatch(html, /apple-touch-icon" href="\.\/icon\.svg"/);
+});
+
+test('the About page carries the disclaimer, privacy and support details and is reachable from the app', () => {
+  const about = fs.readFileSync(path.join(pwa, 'about.html'), 'utf8');
+  for (const id of ['support', 'disclaimer', 'privacy']) assert.match(about, new RegExp(`id="${id}"`));
+  assert.match(about, /mailto:manthangandhi0@gmail\.com/);
+  assert.match(about, /Never send your shop PIN or your license key/);
+  assert.match(about, /not Indian board or bullion rates/);
+  assert.match(about, /not investment advice/);
+  assert.match(about, /gold-api\.com/);
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.equal((js.match(/href="\.\/about\.html"/g) || []).length, 2); // lock screen and Sheet page
+  const sw = fs.readFileSync(path.join(pwa, 'service-worker.js'), 'utf8');
+  assert.match(sw, /about\.html/);
+});
+
+test('the shop name in the header may wrap to two lines instead of being cut off', () => {
+  const css = fs.readFileSync(path.join(pwa, 'styles.css'), 'utf8');
+  assert.match(css, /\.appbar \.brand span:last-child \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(css, /\.appbar-end \{ flex: 0 0 auto; \}/);
 });

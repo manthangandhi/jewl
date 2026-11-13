@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>About, privacy and support · Karigar</title>
+  <meta name="description" content="What Karigar is, where your shop's data lives, what the live rates mean, and how to reach support.">
+  <meta name="theme-color" content="#f1ece6">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=sentient@300,400&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap">
+  <link rel="stylesheet" href="./styles.css?v=20261113about">
+</head>
+<body class="doc-page">
+  <header class="doc-bar">
+    <a class="brand" href="./index.html" aria-label="Karigar, back to the app">
+      <span class="brand-mark"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9 4l-1 5 4 11M15 4l1 5-4 11"/></svg></span>
+      <span>Karigar</span>
+    </a>
+    <a class="btn btn-soft" href="./index.html">Back to the app</a>
+  </header>
+
+  <main class="doc">
+    <h1>About, privacy and support</h1>
+    <p class="lead">Karigar is a ledger for jewellery shops. It keeps your suppliers, customers, gold and silver weights, balances, notes and photos in your own Google Sheet and Google Drive.</p>
+
+    <section id="support" aria-labelledby="support-h">
+      <h2 id="support-h">Support</h2>
+      <p>Something not working, a question, or an idea? Write to us and we will reply as soon as we can.</p>
+      <p><a class="btn btn-primary" href="mailto:manthangandhi0@gmail.com?subject=Karigar%20support">Email support</a></p>
+      <p class="note">When you write, tell us your shop name, what you were doing, what you expected and what happened. A screenshot helps. <strong>Never send your shop PIN or your license key.</strong> We will never ask for them.</p>
+    </section>
+
+    <section id="disclaimer" aria-labelledby="disclaimer-h">
+      <h2 id="disclaimer-h">Disclaimer</h2>
+      <ul>
+        <li><strong>Your records, your responsibility.</strong> Karigar is a record-keeping tool. Balances and reports are only as correct as the entries made. Check them before you rely on them. It is not accounting, tax or legal advice, and it does not file GST or any return. Ask your accountant.</li>
+        <li><strong>Rates are a guide.</strong> Live gold, silver and platinum rates are the international price turned into rupees per gram. They are not Indian board or bullion rates, can be delayed or unavailable, and leave out duty, tax and your dealer’s margin. Do not use them to settle a trade, and they are not investment advice. Confirm the price with your bullion dealer.</li>
+        <li><strong>Your data, your Google account.</strong> Everything lives in a Google Sheet and Google Drive folder that you own. You are responsible for who can open them, for backups, and for the security of your Google account. Deleting an entry, a photo or the Sheet cannot be undone by Karigar.</li>
+        <li><strong>The PIN is a convenience lock.</strong> It keeps casual visitors out of the app. It is not bank-grade security. Keep it private, change it if it leaks, and do not share the Sheet or the script with people you do not trust.</li>
+        <li><strong>Other people’s details.</strong> If you store a customer’s phone number, birthday or photo, you are responsible for having their permission and for following the data protection laws that apply to your shop.</li>
+        <li><strong>As is.</strong> Karigar is provided as it is, without any promise that it is error free or always available. To the extent the law allows, the maker is not liable for losses from its use, from wrong or missing rates, from lost data, or from the services it depends on being down.</li>
+        <li><strong>Messages are sent by you.</strong> Call, WhatsApp and email buttons open your own apps with a message ready. Nothing is sent until you press send.</li>
+      </ul>
+    </section>
+
+    <section id="privacy" aria-labelledby="privacy-h">
+      <h2 id="privacy-h">Privacy</h2>
+      <p>Karigar has no accounts, no adverts and no tracking. It does not collect your shop’s data. Here is where things go.</p>
+      <ul>
+        <li><strong>In your Google Sheet:</strong> suppliers, customers, entries, notes, categories and the demo data if you load it. Customer balances are also written to a readable tab for your accountant.</li>
+        <li><strong>In your Google Drive:</strong> the photos you take on a sale or return, in a folder called “Karigar photos”. The script only reads and changes files in that folder.</li>
+        <li><strong>On this device:</strong> the link to your Sheet, a copy of your books so the app opens fast, your license key, your text size and the last live rates. The PIN is kept only while the tab is open. Clear the browser’s site data to remove the device copy.</li>
+        <li><strong>Sent to other services:</strong> the app asks <em>gold-api.com</em> and <em>open.er-api.com</em> for prices. No shop or customer information goes with those requests, but those services can see your device’s internet address. Fonts come from Fontshare and Google Fonts, which can see it too. Your Sheet is read and written through Google Apps Script.</li>
+        <li><strong>Your license:</strong> the app checks your license key with the license service so it can tell whether your plan is active.</li>
+      </ul>
+    </section>
+
+    <section id="terms" aria-labelledby="terms-h">
+      <h2 id="terms-h">Use and licence</h2>
+      <p>Karigar is licensed to each shop. Your license key belongs to your shop and should not be shared. Third-party services named above, including Google, have their own terms, and those apply to you when you use them through Karigar.</p>
+    </section>
+
+    <section id="version" aria-labelledby="version-h">
+      <h2 id="version-h">This version</h2>
+      <p>Karigar, November 2026. Works on phones, tablets, Windows, Mac and Linux in any modern browser, and can be added to your home screen.</p>
+    </section>
+  </main>
+</body>
+</html>

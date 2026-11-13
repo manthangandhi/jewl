@@ -364,8 +364,7 @@ button.cell:hover, .cell.clickable:hover { background: var(--color-paper-2); }
   .nav-item .ic { display: none; }
   .nav-item:hover { color: var(--color-ink); }
   .nav-item.active::before { top: auto; bottom: -1px; left: var(--space-sm); right: var(--space-sm); width: auto; height: 2px; }
-  .help-btn { display: none; }
-  .lock-text { display: inline; }
+    .lock-text { display: inline; }
   .stage { padding: var(--space-lg) var(--space-lg) var(--space-2xl); gap: var(--space-xl); }
   .fab { bottom: var(--space-lg); right: var(--space-lg); }
   .modal-backdrop { align-items: center; padding: var(--space-lg); }
@@ -585,3 +584,31 @@ details.more[open] summary { margin-bottom: var(--space-sm); }
 .barchart b { font-weight: 500; font-variant-numeric: tabular-nums; }
 .barchart small { color: var(--color-muted); }
 .pill { white-space: nowrap; }
+
+/* ================= the shop name always fits: two lines if it must ================= */
+.appbar .brand { flex: 1 1 auto; min-width: 0; }
+.appbar .brand span:last-child {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; white-space: normal; text-overflow: clip; line-height: 1.15; overflow-wrap: anywhere;
+}
+.appbar-end { flex: 0 0 auto; }
+@media (max-width: 380px) { .appbar { padding-left: var(--space-sm); } .appbar .brand { gap: var(--space-xs); } }
+
+/* ================= About, privacy and support (a plain page) ================= */
+.doc-page { min-height: 100dvh; }
+.doc-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); padding: var(--space-sm) var(--space-md); border-bottom: var(--rule-hair) solid var(--color-rule); background: var(--color-paper); }
+.doc-bar .brand { text-decoration: none; color: var(--color-ink); }
+.doc-bar .btn { min-height: 40px; font-size: var(--text-sm); }
+.doc { max-width: 760px; margin: 0 auto; padding: var(--space-xl) var(--space-md) var(--space-3xl); }
+.doc h1 { max-width: none; font-size: var(--text-3xl); margin-bottom: var(--space-sm); }
+.doc .lead { max-width: 60ch; color: var(--color-ink-2); margin-bottom: var(--space-lg); }
+.doc section { margin-top: var(--space-xl); padding-top: var(--space-md); border-top: var(--rule-head) solid var(--color-ink); scroll-margin-top: var(--space-xl); }
+.doc h2 { max-width: none; font-size: var(--text-xl); margin-bottom: var(--space-sm); }
+.doc p, .doc li { max-width: 68ch; color: var(--color-ink-2); }
+.doc ul { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-sm); }
+.doc li { padding: var(--space-sm) 0; border-bottom: var(--rule-hair) solid var(--color-rule); }
+.doc li strong { color: var(--color-ink); font-weight: 500; }
+.doc .note { padding: var(--space-sm) var(--space-md); border: var(--rule-hair) solid var(--color-rule); background: color-mix(in oklab, var(--color-accent) 6%, var(--color-card)); font-size: var(--text-sm); }
+.doc a:not(.btn) { color: var(--color-accent); }
+
+@media (max-width: 360px) { .nav-item { font-size: var(--text-xs); } .nav-item .ic { width: 18px; height: 18px; } }

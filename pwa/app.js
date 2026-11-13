@@ -716,6 +716,7 @@ function loginScreen() {
     <p class="setup-toggle">
       ${configured ? `<button type="button" class="btn-plain" data-action="setup">Use a different Sheet</button>` : ''}
       <button type="button" class="btn-plain" data-action="gate" data-gate="setup">New shop</button>
+      <a class="btn-plain" href="./about.html" target="_blank" rel="noopener">About and support</a>
     </p>
   `);
 }
@@ -748,11 +749,11 @@ function ratesCard() {
   return `<section class="list-card rates-card" id="rates-card">
     <div class="list-head"><span>Today’s rates</span><button type="button" class="btn-plain" data-action="refresh-rates" ${state.ratesLoading ? 'disabled' : ''}>${ic('refresh')}<span>Refresh rates</span></button></div>
     ${status ? `<p class="rates-status ${state.ratesError ? 'bad' : ''}" role="status">${esc(status)}</p>` : ''}
-    ${rows.length ? `<ul class="rate-list">${rows.map((r) => `<li data-metal="${esc(r.row.metalType)}">
+    ${rows.length && rows.some((r) => r.perGram > 0) ? `<ul class="rate-list">${rows.map((r) => `<li data-metal="${esc(r.row.metalType)}">
       <span class="rate-name">${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</span>
       <span class="rate-src">${r.source === 'board' ? 'Your board rate' : r.source === 'live' ? 'Live' : ''}</span>
       <strong>${r.perGram ? `${money(r.perGram)}<small>per gram</small>` : 'No rate yet'}</strong>
-    </li>`).join('')}</ul>` : '<p class="lede">Add a metal under Metals to see its rate here.</p>'}
+    </li>`).join('')}</ul>` : `<p class="lede">${rows.length ? (state.ratesLoading ? 'Fetching today’s rates…' : 'Rates will show here as soon as the internet is back. You can also type a board rate for each metal on the Metals page.') : 'Add a metal under Metals to see its rate here.'}</p>`}
     <form class="premium-row" id="premium-form">
       <label>Add to the international price (percent)
         <input name="premium" type="number" step="0.1" inputmode="decimal" value="${esc(state.premiumPct || '')}" placeholder="0">
@@ -1355,6 +1356,14 @@ function booksView() {
             <span class="cell-main"><strong>Update my Google Sheet</strong><small>One-time, guided — needed for customers and photos</small></span>
             ${ic('chevron')}
           </button>
+          <button class="cell" data-view="help" type="button">
+            <span class="cell-main"><strong>How this works</strong><small>Short help for every screen</small></span>
+            ${ic('chevron')}
+          </button>
+          <a class="cell" href="./about.html" target="_blank" rel="noopener">
+            <span class="cell-main"><strong>About, privacy and support</strong><small>Disclaimer, where your data lives, and how to reach us</small></span>
+            ${ic('chevron')}
+          </a>
           <button class="cell" data-action="text-size" type="button">
             <span class="cell-main"><strong>${state.bigText ? 'Normal text size' : 'Bigger text'}</strong><small>Make everything easier to read</small></span>
           </button>
@@ -1430,7 +1439,6 @@ function render() {
           ${ic('refresh')}<span>Refresh data</span>
         </button>
         <button class="icon-btn text-size" data-action="text-size" type="button" aria-label="${state.bigText ? 'Normal text size' : 'Bigger text'}"><span aria-hidden="true">A<sup>${state.bigText ? '−' : '+'}</sup></span></button>
-        <button class="icon-btn help-btn" data-view="help" type="button" aria-label="How this works">${ic('help')}</button>
         <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock the app">${ic('lock')}<span class="lock-text">Lock</span></button>
       </div>
     </header>
