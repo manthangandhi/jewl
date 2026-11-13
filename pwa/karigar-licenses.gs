@@ -70,18 +70,26 @@ function trialEndIso_(fromDate, days) {
   return d.toISOString();
 }
 
+function parseEnd_(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return NaN;
+  const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s);
+  if (m) return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 23, 59, 59);
+  return Date.parse(s);
+}
+
+/** Status AND dates must both say yes. A past trialEndsAt blocks even when the status was left as ACTIVE. */
 function licenseCurrentlyAllowed_(status, trialEndsAt, paidUntil, createdAt, now) {
   const s = String(status || "").trim().toUpperCase();
   const t = now || Date.now();
-  if (s === "TRIAL") {
-    const endRaw = trialEndsAt || (createdAt ? trialEndIso_(createdAt, TRIAL_DAYS) : "");
-    const end = Date.parse(endRaw);
-    return isFinite(end) && t <= end;
-  }
+  const trial = parseEnd_(trialEndsAt || (createdAt && s === "TRIAL" ? trialEndIso_(createdAt, TRIAL_DAYS) : ""));
+  const paid = parseEnd_(paidUntil);
+  if (s === "TRIAL") return isFinite(trial) && t <= trial;
   if (s === "ACTIVE") {
-    if (!paidUntil) return true;
-    const end = Date.parse(paidUntil);
-    return isFinite(end) ? t <= end : true;
+    if (String(paidUntil || "").trim() && !isFinite(paid)) return false;
+    if (isFinite(paid)) return t <= paid;
+    if (isFinite(trial)) return t <= trial;
+    return true;
   }
   return false;
 }

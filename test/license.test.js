@@ -25,13 +25,13 @@ test('a verdict is allowed only for an active or trial plan that the server appr
 });
 
 test('the owner is warned in the last week, and told plainly why when it has ended', () => {
-  const trial = (d) => normalizeVerdict({ allowed: true, status: 'TRIAL', trialEndsAt: iso(d) });
+  const trial = (d) => normalizeVerdict({ allowed: true, status: 'TRIAL', trialEndsAt: iso(d) }, NOW);
   assert.equal(daysLeft(trial(5), NOW), 5);
   assert.equal(planNotice(trial(5), NOW), 'Your trial ends in 5 days.');
   assert.equal(planNotice(trial(1), NOW), 'Your trial ends in 1 day.');
   assert.equal(planNotice(trial(0.2), NOW), 'Your trial ends in 1 day.');
   assert.equal(planNotice(trial(20), NOW), '');
-  const paid = normalizeVerdict({ allowed: true, status: 'ACTIVE', paidUntil: iso(3) });
+  const paid = normalizeVerdict({ allowed: true, status: 'ACTIVE', paidUntil: iso(3) }, NOW);
   assert.equal(planNotice(paid, NOW), 'Your plan ends in 3 days.');
   assert.equal(planNotice(normalizeVerdict({ allowed: false, status: 'INACTIVE' }), NOW), '');
   assert.match(whyBlocked(normalizeVerdict({ allowed: false, status: 'TRIAL', trialEndsAt: '2026-10-01T00:00:00Z' })), /free trial ended on 1 Oct 2026/);

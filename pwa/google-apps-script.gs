@@ -385,12 +385,12 @@ function demoLedger_() {
       settle("demo-x-r1", "demo-ramesh", 40000, "GOLD", "22K", 20, "Part settle + 20g", 1)
     ],
     metalMaster: [
-      { id: "mm-gold-24k", metalType: "GOLD", purity: "24K", rateInrPerGram: 7800, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
-      { id: "mm-gold-22k", metalType: "GOLD", purity: "22K", rateInrPerGram: 7200, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
-      { id: "mm-gold-18k", metalType: "GOLD", purity: "18K", rateInrPerGram: 5900, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
-      { id: "mm-gold-14k", metalType: "GOLD", purity: "14K", rateInrPerGram: 4600, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
-      { id: "mm-silver-999", metalType: "SILVER", purity: "999", rateInrPerGram: 118, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
-      { id: "mm-silver-925", metalType: "SILVER", purity: "925", rateInrPerGram: 108, status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt }
+      { id: "mm-gold-24k", metalType: "GOLD", purity: "24K", rateInrPerGram: "", status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-gold-22k", metalType: "GOLD", purity: "22K", rateInrPerGram: "", status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-gold-18k", metalType: "GOLD", purity: "18K", rateInrPerGram: "", status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-gold-14k", metalType: "GOLD", purity: "14K", rateInrPerGram: "", status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-silver-999", metalType: "SILVER", purity: "999", rateInrPerGram: "", status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt },
+      { id: "mm-silver-925", metalType: "SILVER", purity: "925", rateInrPerGram: "", status: "ACTIVE", createdAt: now.createdAt, updatedAt: now.updatedAt }
     ]
   };
 }

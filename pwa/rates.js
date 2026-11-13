@@ -82,14 +82,26 @@ export function parityRate(snapshot, metalType, purity) {
  * The rate to show and to price a sale with. Owner's board rate first, then live with the adjustment.
  * `adjust` is { GOLD: 6, SILVER: 6, PLATINUM: 6.4 } (percent over the world price).
  */
-export function effectiveRate({ master = [], snapshot = null, adjust = DEFAULT_ADJUST }, metalType, purity) {
+export function effectiveRate({ master = [], snapshot = null, adjust = DEFAULT_ADJUST, now = Date.now() }, metalType, purity) {
   const type = String(metalType || '').toUpperCase();
   const row = master.find((r) => String(r.metalType || '').toUpperCase() === type && String(r.purity) === String(purity)
     && String(r.status || 'ACTIVE').toUpperCase() !== 'INACTIVE');
   const manual = Number(row?.rateInrPerGram || 0);
-  if (manual > 0) return { perGram: manual, source: 'board' };
+  if (manual > 0 && boardRateIsToday(row, now)) return { perGram: manual, source: 'board' };
   const live = liveRate(snapshot, type, purity, adjustFor(adjust, type));
   return live > 0 ? { perGram: live, source: 'live' } : { perGram: 0, source: 'none' };
+}
+
+/**
+ * A board rate is today's rate. One typed on an earlier day is old news and must not hide the live price,
+ * so it only counts when it was saved on the same calendar day. A row with no save date counts (older data).
+ */
+export function boardRateIsToday(row, now = Date.now()) {
+  const raw = row?.updatedAt;
+  if (!raw) return true;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return true;
+  return new Date(t).toDateString() === new Date(now).toDateString();
 }
 
 /** What the adjustment must be for the world price to equal the rate the owner's dealer quoted (per gram). */

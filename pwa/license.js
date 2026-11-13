@@ -15,10 +15,31 @@ export function isConfiguredUrl(url) {
   return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u);
 }
 
-export function normalizeVerdict(json) {
+/** Parse an ISO date, or a day-first date such as 13/11/2026 typed into a Sheet. NaN when it is not a date. */
+export function parseEnd(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return NaN;
+  const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s);
+  if (dmy) return Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 23, 59, 59);
+  return Date.parse(s);
+}
+
+/** True when any end date on the record has passed. A trial date counts even if the status was left as ACTIVE. */
+export function datesExpired(v, now = Date.now()) {
+  const trial = parseEnd(v.trialEndsAt);
+  const paid = parseEnd(v.paidUntil);
+  const status = String(v.status || '').toUpperCase();
+  if (status === 'TRIAL') return Number.isFinite(trial) ? now > trial : Boolean(String(v.trialEndsAt || '').trim());
+  if (Number.isFinite(paid)) return now > paid;
+  if (String(v.paidUntil || '').trim()) return true; // a paid date that cannot be read: do not guess
+  return Number.isFinite(trial) && now > trial;
+}
+
+export function normalizeVerdict(json, now = Date.now()) {
   const j = json && typeof json === 'object' ? json : {};
   const status = String(j.status || '').trim().toUpperCase();
-  const allowed = j.allowed === true && (status === '' || status === 'ACTIVE' || status === 'TRIAL');
+  const draft = { status, trialEndsAt: String(j.trialEndsAt || ''), paidUntil: String(j.paidUntil || '') };
+  const allowed = j.allowed === true && (status === '' || status === 'ACTIVE' || status === 'TRIAL') && !datesExpired(draft, now);
   return {
     allowed,
     status: status || (allowed ? 'ACTIVE' : 'INACTIVE'),
@@ -32,15 +53,15 @@ export function normalizeVerdict(json) {
 /** Whole days until the plan ends, or null when there is no end date. */
 export function daysLeft(verdict, now = Date.now()) {
   if (!verdict) return null;
-  const raw = verdict.status === 'TRIAL' ? verdict.trialEndsAt : verdict.paidUntil;
-  const end = Date.parse(raw);
+  const raw = verdict.status === 'TRIAL' ? verdict.trialEndsAt : (verdict.paidUntil || verdict.trialEndsAt);
+  const end = parseEnd(raw);
   if (!Number.isFinite(end)) return null;
   return Math.ceil((end - now) / DAY);
 }
 
 export function endDateLabel(verdict) {
-  const raw = verdict?.status === 'TRIAL' ? verdict.trialEndsAt : verdict?.paidUntil;
-  const d = new Date(raw);
+  const raw = verdict?.status === 'TRIAL' ? verdict.trialEndsAt : (verdict?.paidUntil || verdict?.trialEndsAt);
+  const d = new Date(parseEnd(raw));
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 

@@ -1,3 +1,4 @@
+import { monthlyTrend, salesMix, topCustomers, duesAgeing, quietCustomers, changePct } from './insights.js';
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   SALE, RETURN, PAYMENT, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
@@ -9,7 +10,7 @@ import {
   dueFollowUps, upcomingDates, notesFor, whenLabel, daysUntil
 } from './crm.js';
 import {
-  fetchLiveRates, effectiveRate, suggestedAmount, ratesAreStale, describeAge, adjustFor, parityRate, calibrateAdjust,
+  fetchLiveRates, effectiveRate, boardRateIsToday, suggestedAmount, ratesAreStale, describeAge, adjustFor, parityRate, calibrateAdjust,
   perGramFromUnit, dealerQuote, DEFAULT_ADJUST
 } from './rates.js';
 import { compressImage, photoFileName } from './photo.js';
@@ -155,6 +156,7 @@ function ic(name) {
     today: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
     sheet: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>',
     report: '<path d="M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3"/>',
+    insights: '<path d="M3 17l5-5 4 3 8-9"/><path d="M15 6h5v5"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/>',
     chevron: '<path d="M9 6l6 6-6 6"/>',
@@ -1431,6 +1433,105 @@ function supplierPassbook() {
     </div>`;
 }
 
+
+const compactMoney = (n) => {
+  const v = Math.abs(Number(n || 0));
+  const sign = n < 0 ? '-' : '';
+  if (v >= 10000000) return `${sign}₹${+(v / 10000000).toFixed(1)}Cr`;
+  if (v >= 100000) return `${sign}₹${+(v / 100000).toFixed(1)}L`;
+  if (v >= 1000) return `${sign}₹${+(v / 1000).toFixed(1)}k`;
+  return `${sign}₹${Math.round(v)}`;
+};
+
+/** Grouped bars per month: what was sold, and what actually came in. */
+function trendChart(months) {
+  const W = 640; const H = 240; const L = 54; const R = 12; const T = 14; const B = 30;
+  const top = Math.max(1, ...months.flatMap((m) => [m.sold, m.collected]));
+  const step = Math.pow(10, Math.floor(Math.log10(top)));
+  const max = Math.ceil(top / step) * step;
+  const iw = W - L - R; const ih = H - T - B;
+  const slot = iw / months.length; const bw = Math.min(26, slot / 3);
+  const y = (v) => T + ih - (v / max) * ih;
+  const grid = [0, 0.5, 1].map((f) => `<line x1="${L}" x2="${W - R}" y1="${y(max * f)}" y2="${y(max * f)}" class="ch-grid"/><text x="${L - 8}" y="${y(max * f) + 4}" class="ch-axis" text-anchor="end">${compactMoney(max * f)}</text>`).join('');
+  const bars = months.map((m, i) => {
+    const cx = L + slot * i + slot / 2;
+    const bar = (v, dx, cls, label) => `<rect x="${cx + dx}" y="${y(v)}" width="${bw}" height="${Math.max(0, T + ih - y(v))}" rx="3" class="${cls}"><title>${esc(m.label)} ${m.year}: ${label} ${money(v)}</title></rect>`;
+    return `${bar(m.sold, -bw - 1, 'ch-sold', 'Sales')}${bar(m.collected, 1, 'ch-in', 'Collected')}<text x="${cx}" y="${H - 9}" class="ch-axis" text-anchor="middle">${esc(m.label)}</text>`;
+  }).join('');
+  return `<svg class="trend-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Sales and money collected by month">${grid}${bars}</svg>`;
+}
+
+function insightsView() {
+  const now = new Date();
+  const months = monthlyTrend({ sales: state.sales, money: state.money }, now, 6);
+  const cur = months[months.length - 1];
+  const prev = months[months.length - 2];
+  const salesChange = changePct(cur.sold, prev.sold);
+  const ninety = new Date(now.getTime() - 90 * 86400000).toISOString().slice(0, 10);
+  const mix = salesMix(state.sales, { from: ninety });
+  const best = topCustomers(state.customers, state.sales, { from: ninety, limit: 5 });
+  const ageing = duesAgeing(state.customers, state.sales, now);
+  const dues = ageing.reduce((n, b) => n + b.amountInr, 0);
+  const quiet = quietCustomers(state.customers, state.sales, { days: 90, now, limit: 5 });
+  const items = categoryTotals(state.sales, { from: ninety }).filter((r) => r.soldInr > 0).sort((a, b) => b.soldInr - a.soldInr).slice(0, 6);
+  const mixColour = { GOLD: 'var(--swatch-gold)', SILVER: 'var(--swatch-silver)', PLATINUM: 'var(--swatch-platinum)' };
+  const hasSales = state.sales.length > 0;
+  const trendTxt = salesChange === null ? 'No sales last month to compare' : salesChange >= 0 ? `Up ${salesChange}% on last month` : `Down ${Math.abs(salesChange)}% on last month`;
+  const pay = (state.summary?.bySupplier || []).filter((r) => r.payable > 0).sort((a, b) => b.payable - a.payable).slice(0, 5);
+  const maxPay = Math.max(1, ...pay.map((r) => r.payable));
+  const maxBest = Math.max(1, ...best.map((r) => r.netInr));
+  const maxAge = Math.max(1, ...ageing.map((b) => b.amountInr));
+  const maxItem = Math.max(1, ...items.map((r) => r.soldInr));
+  const stat = (label, figure, note, tone = '') => `<div class="insight-stat ${tone}"><span>${label}</span><strong>${figure}</strong><small>${note}</small></div>`;
+  const barRow = (label, sub, value, max, tone = '') => `<li><span>${esc(label)}${sub ? ` <small>${esc(sub)}</small>` : ''}</span><span class="bar-track"><i class="bar ${tone}" style="--w:${Math.max(2, Math.round((value / max) * 100))}%"></i></span><b>${money(value)}</b></li>`;
+  if (!hasSales && !state.money.length) {
+    return `<div class="report-page fill"><div class="empty-khata"><p class="empty-title">Insights appear as you record business</p><p class="lede">Add a few sales and payments and this page will show trends, your best customers and who owes you.</p></div></div>`;
+  }
+  return `
+    <div class="insights">
+      <section class="insight-stats" aria-label="This month">
+        ${stat('Sales this month', money(cur.sold), esc(trendTxt), salesChange !== null && salesChange < 0 ? 'owe' : 'collect')}
+        ${stat('Collected this month', money(cur.collected), cur.sold ? `${Math.min(999, Math.round((cur.collected / cur.sold) * 100))}% of what you sold` : 'Money received')}
+        ${stat('Paid to suppliers', money(cur.paidOut), 'This month')}
+        ${stat('Customers owe you', money(dues), ageing[2].count ? `${money(ageing[2].amountInr)} is over 60 days old` : 'Nothing overdue', ageing[2].count ? 'owe' : '')}
+      </section>
+      <section class="list-card ins-wide">
+        <div class="list-head"><span class="head-title">${ic('insights')}<span>Sales and money collected, last 6 months</span></span>
+          <span class="ch-legend"><i class="ch-key ch-sold"></i>Sales <i class="ch-key ch-in"></i>Collected</span></div>
+        ${trendChart(months)}
+        <details class="ch-table"><summary>${ic('list')}<span>See the numbers</span></summary>
+          <div class="data-table"><div class="th"><span>Month</span><span>Sales</span><span>Returns</span><span>Collected</span><span>Paid out</span></div>
+          ${months.slice().reverse().map((m) => `<div class="tr"><span>${esc(m.label)} ${m.year}</span><span>${money(m.sold)}</span><span>${money(m.returned)}</span><span>${money(m.collected)}</span><span>${money(m.paidOut)}</span></div>`).join('')}</div>
+        </details>
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span class="head-title">${ic('gem')}<span>What sells, last 90 days</span></span></div>
+        ${mix.length ? `<div class="mix-bar" role="img" aria-label="Share of sales by metal">${mix.map((m) => `<i style="flex:${m.amountInr};background:${mixColour[m.metalType] || 'var(--color-pencil)'}" title="${esc(titleCase(m.metalType))} ${m.pct}%"></i>`).join('')}</div>
+        <ul class="mix-legend">${mix.map((m) => `<li><i style="background:${mixColour[m.metalType] || 'var(--color-pencil)'}"></i>${esc(titleCase(m.metalType))} <b>${m.pct}%</b> <small>${money(m.amountInr)}</small></li>`).join('')}</ul>` : '<div class="empty-in">No sales in the last 90 days</div>'}
+        ${items.length ? `<ol class="barchart" aria-label="Best selling items">${items.map((r) => barRow(r.category, titleCase(r.metalType), r.soldInr, maxItem)).join('')}</ol>` : ''}
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span class="head-title">${ic('customers')}<span>Best customers, last 90 days</span></span></div>
+        ${best.length ? `<ol class="barchart">${best.map((r) => barRow(r.name, `${r.visits} ${r.visits === 1 ? 'purchase' : 'purchases'}`, r.netInr, maxBest)).join('')}</ol>` : '<div class="empty-in">No sales in the last 90 days</div>'}
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span class="head-title">${ic('in')}<span>Who owes you, by age</span></span><span>${money(dues)}</span></div>
+        <ol class="barchart">${ageing.map((b, i) => barRow(b.label, `${b.count} ${b.count === 1 ? 'customer' : 'customers'}`, b.amountInr, maxAge, i === 2 ? 'warn' : '')).join('')}</ol>
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span class="head-title">${ic('out')}<span>You owe suppliers</span></span><span>${money(state.summary?.weOweInr || 0)}</span></div>
+        ${pay.length ? `<ol class="barchart">${pay.map((r) => barRow(r.name, '', r.payable, maxPay, 'warn')).join('')}</ol>` : '<div class="empty-in">Nothing to pay right now</div>'}
+      </section>
+      <section class="list-card ins-wide">
+        <div class="list-head"><span class="head-title">${ic('bell')}<span>Customers who have gone quiet</span></span><span>${quiet.length}</span></div>
+        ${quiet.length ? `<ul class="plain-list">${quiet.map((q) => {
+    const wa = whatsappLink(q.phone, `Namaste ${q.name}, it has been a while. We have new designs at ${state.shopName || 'our shop'}. Do visit us.`);
+    return `<li class="cell"><button type="button" class="cell-hit" data-customer="${esc(q.id)}">${avatar(q.name)}<span class="cell-main"><strong>${esc(q.name)}</strong><small>No purchase for ${q.quietDays} days. Spent ${money(q.lifetimeInr)} so far</small></span></button>${wa ? `<a class="btn btn-soft" href="${esc(wa)}" target="_blank" rel="noopener">${ic('chat')}<span>Say hello</span></a>` : ''}</li>`;
+  }).join('')}</ul>` : '<div class="empty-in">Nobody who bought before has been away more than 90 days.</div>'}
+      </section>
+    </div>`;
+}
+
 function reportView() {
   const range = currentReportRange();
   const report = currentReport();
@@ -1511,14 +1612,14 @@ function helpView() {
     <div class="list-head"><span>How this works</span><button type="button" class="btn-plain" data-action="tour-start">Start tour</button></div>
     <div class="help-body">
       ${item('Today', 'Your day at a glance.', 'Live gold, silver and platinum rates, who to follow up with, birthdays and anniversaries in the next week, and the biggest amounts to get and to give.')}
-      ${item('Live rates', 'International price, in rupees.', 'Rates come from the world market and are turned into rupees per gram for each purity. Indian board rates usually run a few percent higher, so add the difference on the Today page, or type your own board rate on the Metals page, which always wins. On a sale, the weight is priced at today’s rate and you can tap to use it.')}
+      ${item('Live rates', 'International price, in rupees.', 'Rates come from the world market and are turned into rupees per gram for each purity. Indian board rates usually run a few percent higher, so add the difference on the Today page, or type your own board rate on the Metals page, which wins for the day you type it. On a sale, the weight is priced at today’s rate and you can tap to use it.')}
       ${item('Hume dena and Hume lena', 'The same two words everywhere.', 'Hume dena means we have to give. Hume lena means we have to get. They mean the same on every supplier and every customer.')}
       ${item('Suppliers', 'Karigars and wholesalers. One card each.', 'Purchase is what you bought. Payment is what you paid. Metal given and Metal received move metal with no rupees. Settlement closes the account. Gold, silver and cash sit on the same card.')}
       ${item('Customers', 'People who buy from you. One card each.', 'Sale is what they bought. Return is what they gave back. Payment is money they paid you later. Pick the metal, the item (chain, ring, mangalsutra) and the weight. A sale or return can carry a photo.')}
       ${item('Contacts and follow-ups', 'Remember every person.', 'Each card has Call, WhatsApp and Email buttons, a follow-up date, notes of what was said, and for customers a birthday and anniversary. Remind about dues opens WhatsApp with the message ready to send. Nothing is sent until you press send.')}
       ${item('Photos', 'Take a photo of the item.', 'On a sale or return, tap Take photo or Choose photo. The picture is saved in your own Google Drive, in a Karigar photos folder. Tap the entry later to see it.')}
       ${item('Print and share', 'One supplier’s khata, not the whole shop.', 'Open a supplier. Print for paper or Save as PDF. Share PDF sends the same account on WhatsApp when your phone allows it.')}
-      ${item('Metals and categories', 'Purities, item types and an optional board rate.', 'These appear on every purchase and sale. If you type a rate in rupees per gram it replaces the live rate for that metal.')}
+      ${item('Metals and categories', 'Purities, item types and an optional board rate.', 'These appear on every purchase and sale. If you type a rate in rupees per gram it replaces the live rate for that metal for the rest of that day, then the live rate returns.')}
       ${item('Refresh data', 'Reloads the Google Sheet.', 'You stay unlocked. The browser refresh button asks for the PIN again. Lock signs you out.')}
       ${item('Demo khata', 'Sheet screen only, not for live books.', 'Load demo writes sample suppliers, customers, sales and notes into the Google Sheet. Remove demo deletes only those.')}
     </div>
@@ -1614,6 +1715,7 @@ function viewContent() {
   if (state.view === 'customers') return customersHome();
   if (state.view === 'today') return todayView();
   if (state.view === 'report') return reportView();
+  if (state.view === 'insights') return insightsView();
   if (state.view === 'today') return reportView();
   if (state.view === 'masters') return mastersView();
   if (state.view === 'books') return booksView();
@@ -1639,7 +1741,8 @@ function render() {
         <button class="nav-item nav-core ${on('today')}" data-view="today" type="button" ${on('today') ? 'aria-current="page"' : ''}>${ic('today')}<span>Today</span></button>
         <button class="nav-item nav-core ${on('customers', 'customer')}" data-view="customers" type="button" ${on('customers', 'customer') ? 'aria-current="page"' : ''}>${ic('customers')}<span>Customers</span></button>
         <button class="nav-item nav-core ${on('parties', 'supplier')}" data-view="parties" type="button" ${on('parties', 'supplier') ? 'aria-current="page"' : ''}>${ic('parties')}<span>Suppliers</span></button>
-        <button class="nav-item nav-core ${on('report')}" data-view="report" type="button" ${on('report') ? 'aria-current="page"' : ''}>${ic('report')}<span>Report</span></button>
+        <button class="nav-item nav-core ${on('insights')}" data-view="insights" type="button" ${on('insights') ? 'aria-current="page"' : ''}>${ic('insights')}<span>Insights</span></button>
+        <button class="nav-item ${on('report')}" data-view="report" type="button" ${on('report') ? 'aria-current="page"' : ''}>${ic('report')}<span>Report</span></button>
         <button class="nav-item ${on('masters')}" data-view="masters" type="button" ${on('masters') ? 'aria-current="page"' : ''}>${ic('masters')}<span>Metals</span></button>
         <button class="nav-item nav-core ${on('books')}" data-view="books" type="button" ${on('books') ? 'aria-current="page"' : ''}>${ic('sheet')}<span>Sheet</span></button>
         <button class="nav-item ${on('help')}" data-view="help" type="button" ${on('help') ? 'aria-current="page"' : ''}>${ic('help')}<span>How to</span></button>
@@ -2071,7 +2174,7 @@ function metalMasterModal() {
     <form id="data-form" data-kind="metalMaster">
       <label>Metal type<input name="metalType" required value="${esc(e.metalType || 'GOLD')}" placeholder="GOLD / SILVER"></label>
       <label>Purity<input name="purity" required value="${esc(e.purity || '')}" placeholder="22K / 999"></label>
-      <label>Board rate ₹ / gram (optional)<input name="rateInrPerGram" type="number" min="0" step="0.01" value="${esc(e.rateInrPerGram || '')}" placeholder="Blank = not on the header board"></label>
+      <label>Board rate ₹ / gram (optional, counts for today only)<input name="rateInrPerGram" type="number" min="0" step="0.01" value="${esc(e.rateInrPerGram || '')}" placeholder="Blank = not on the header board"></label>
       <label>Status<select name="status">
         <option value="ACTIVE" ${e.status !== 'INACTIVE' ? 'selected' : ''}>Active</option>
         <option value="INACTIVE" ${e.status === 'INACTIVE' ? 'selected' : ''}>Inactive</option>
@@ -2106,7 +2209,7 @@ function mastersView() {
               <em class="master-kicker">${esc(titleCase(row.metalType))}</em>
               <strong class="master-purity">${esc(row.purity)}</strong>
             </span>
-            <span class="master-rate ${n > 0 ? '' : 'none'}">${n > 0 ? `${money(n)}/g` : 'No board rate'}</span>
+            <span class="master-rate ${n > 0 ? '' : 'none'}">${n > 0 ? (boardRateIsToday(row) ? `${money(n)}/g today` : `${money(n)}/g, old: live rate used`) : 'No board rate'}</span>
             ${off ? '<span class="master-off">Off</span>' : ''}
           </button>`;
   }).join('')}</div>
