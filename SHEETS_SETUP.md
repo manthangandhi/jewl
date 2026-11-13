@@ -40,7 +40,7 @@ The newest app adds customers, sale/return entries with photos, and metal item t
 
 1. Open the shop Sheet → **Extensions → Apps Script**.
 2. Select all, paste the newest [`pwa/google-apps-script.gs`](./pwa/google-apps-script.gs). **Put your own `SCRIPT_PIN`, `LICENSE_KEY` and `LICENSE_URL` back at the top** (they are overwritten by the paste).
-3. Gear → Project Settings → Show `appsscript.json` → paste [`pwa/appsscript.json`](./pwa/appsscript.json). It now also lists `drive.file`, which lets Karigar save photos **only in files it creates itself** (a “Karigar photos” folder in your Drive). It cannot read your other Drive files.
+3. Gear → Project Settings → Show `appsscript.json` → paste [`pwa/appsscript.json`](./pwa/appsscript.json). It now also lists the Google Drive permission (`drive`). Google's Apps Script only offers photo saving with this permission. Karigar only ever creates and reads its own “Karigar photos” folder; it never touches your other files.
 4. Run **authorizeKarigar** → Allow. Then run **initLedger** (adds the new tabs: `Customers`, `Sales`, `Categories`, `CustomerKhata`).
 5. **Deploy → Manage deployments → pencil → New version → Deploy.** The `/exec` URL stays the same.
 6. In the app tap **Refresh data**.

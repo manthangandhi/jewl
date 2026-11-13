@@ -4,7 +4,7 @@
  * 2. Gear → Project Settings → Show "appsscript.json". Scopes:
  *    spreadsheets.currentonly
  *    script.external_request
- *    drive.file   (customer photos — only files Karigar itself creates)
+ *    drive        (customer photos — Karigar only reads/writes its own "Karigar photos" folder)
  * 3. Run authorizeKarigar → Allow (this spreadsheet + Connect to an external service).
  * 4. Run initLedger to create tabs.
  * 5. Deploy → Web app → Execute as Me → Anyone. Copy /exec into the PWA.

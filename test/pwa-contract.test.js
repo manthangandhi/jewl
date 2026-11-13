@@ -139,8 +139,7 @@ test('Apps Script stores customers, sales, categories and photos in Drive', () =
   assert.match(gs, /DriveApp\.createFolder/);
   assert.match(gs, /Array\.isArray\(body\.customers\)/);
   const manifest = fs.readFileSync(path.join(pwa, 'appsscript.json'), 'utf8');
-  assert.match(manifest, /auth\/drive\.file/);
-  assert.doesNotMatch(manifest, /auth\/drive"/);
+  assert.match(manifest, /auth\/drive"/);
   assert.equal(fs.readFileSync(path.join(pwa, 'google-apps-script.gs'), 'utf8'), fs.readFileSync(path.join(process.cwd(), 'google-apps-script.gs'), 'utf8'));
 });
 
