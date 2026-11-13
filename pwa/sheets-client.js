@@ -89,7 +89,10 @@ export function explainLedgerError(raw) {
     return 'Photos need one more permission. In the shop Apps Script: paste the new Code.gs, run authorizeKarigar → Allow (Google Drive), then Deploy → Manage deployments → New version.';
   }
   if (/wrong shop pin/i.test(msg)) {
-    return 'Wrong shop PIN. It must match SCRIPT_PIN in the deployed Code.gs. After you change the PIN, Deploy → Manage deployments → New version.';
+    return 'Wrong shop PIN. Please try again. (If it was changed recently, the Sheet script needs a new deployment so the new PIN takes effect.)';
+  }
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(msg)) {
+    return 'Could not reach Google. Check your internet. Your last entry is kept on this device and will be saved with your next change.';
   }
   if (/not licensed|license key|paused for this shop|not active/i.test(msg)) {
     return 'This shop is not licensed to use Karigar. Pay your Karigar provider; they will send a license key and set you Active. Your Google Sheet is still yours.';

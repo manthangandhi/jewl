@@ -83,7 +83,7 @@ test('assertPartyName refuses a mobile number as the party name', async () => {
   const { assertPartyName } = await import('../pwa/sheet-model.js');
   assert.equal(assertPartyName('Ramesh Karigar'), 'Ramesh Karigar');
   assert.throws(() => assertPartyName('9820011122'), /not the mobile/);
-  assert.throws(() => assertPartyName('  '), /party name/);
+  assert.throws(() => assertPartyName('  '), /Enter the name/);
 });
 
 test('a demo row is dropped even if a name was stored in the id column', async () => {

@@ -13,6 +13,9 @@
     --color-accent: #264d71; --color-accent-ink: #f5f1ec; --color-focus: #326797;
     --color-card: #f9f7f2; --color-card-edge: #d6d0c9; --color-pencil: #6d6863;
     --color-error: #be2323; --color-success: #21763c;
+    --stain-1: #c98b90; --stain-2: #869a77; --stain-3: #a4744f; --stain-4: #78a1a6;
+    --color-copper: #7b461e;
+    --swatch-gold: #ba882e; --swatch-silver: #9399a0; --swatch-platinum: #7a898f; --swatch-other: #887e74;
   }
 }
 
@@ -21,6 +24,12 @@
   --control: 46px;
   --nav-h: 60px;
   --font-label: var(--font-body);
+  --color-copper: oklch(45% 0.09 55);
+  /* metals: a small swatch so gold, silver and platinum are recognised at a glance */
+  --swatch-gold: linear-gradient(135deg, oklch(86% 0.10 90), oklch(66% 0.12 78));
+  --swatch-silver: linear-gradient(135deg, oklch(88% 0.008 250), oklch(68% 0.012 250));
+  --swatch-platinum: linear-gradient(135deg, oklch(84% 0.012 215), oklch(62% 0.02 225));
+  --swatch-other: linear-gradient(135deg, oklch(80% 0.02 70), oklch(60% 0.02 70));
 }
 html { font-size: 16px; -webkit-text-size-adjust: 100%; }
 html.big-text { font-size: 19px; }
@@ -413,3 +422,84 @@ button.cell:hover, .cell.clickable:hover { background: var(--color-paper-2); }
   a { text-decoration: none; }
 }
 .party-card .cell-main { color: var(--color-ink); }
+
+/* ================= life: colour, motion, feedback ================= */
+/* a soft wash of the theme's stain colours behind the paper */
+body {
+  background: var(--color-paper);
+  background-image:
+    radial-gradient(60rem 28rem at 8% -6%, color-mix(in oklab, var(--stain-1) 20%, transparent), transparent 70%),
+    radial-gradient(52rem 26rem at 100% 0%, color-mix(in oklab, var(--stain-4) 22%, transparent), transparent 70%),
+    radial-gradient(40rem 22rem at 60% 100%, color-mix(in oklab, var(--stain-3) 12%, transparent), transparent 70%);
+  background-attachment: fixed;
+}
+.appbar { background: color-mix(in oklab, var(--color-paper) 92%, transparent); }
+.brand-mark { border-color: var(--color-accent); color: var(--color-accent); }
+.brand-mark .ic { width: 16px; height: 16px; }
+.onboard-card .brand-mark { width: 44px; height: 44px; }
+.onboard-card .brand-mark .ic { width: 22px; height: 22px; }
+.nav-item.active { color: var(--color-accent); }
+
+/* the main buttons carry the slate accent; the quiet ones stay outlined */
+.btn-primary, .sale-btn.sold, .voucher-col button, .fab { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); }
+.btn-primary:hover:not(:disabled), .sale-btn.sold:hover, .voucher-col button:hover, .fab:hover { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-paper); }
+.sale-btn.returned, .voucher-col.got button { color: var(--color-copper); border-color: var(--color-copper); }
+.sale-btn.returned:hover, .voucher-col.got button:hover { background: var(--color-copper); border-color: var(--color-copper); color: var(--color-accent-ink); }
+.chip.on { background: var(--color-accent); border-color: var(--color-accent); }
+
+/* the figures */
+.bh.collect { background: color-mix(in oklab, var(--color-success) 7%, transparent); }
+.bh.owe { background: color-mix(in oklab, var(--color-error) 6%, transparent); }
+.bh { padding-left: var(--space-md); }
+.bh:first-child { padding-left: var(--space-md); }
+
+/* avatars take one of the four stain colours */
+.avatar { border-color: transparent; color: var(--color-ink); }
+.avatar[data-tone="1"] { background: color-mix(in oklab, var(--stain-1) 34%, var(--color-card)); }
+.avatar[data-tone="2"] { background: color-mix(in oklab, var(--stain-2) 34%, var(--color-card)); }
+.avatar[data-tone="3"] { background: color-mix(in oklab, var(--stain-3) 30%, var(--color-card)); }
+.avatar[data-tone="4"] { background: color-mix(in oklab, var(--stain-4) 38%, var(--color-card)); }
+
+/* metal swatches */
+.pill::before, .rate-chip::before, .master-row::before {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-right: var(--space-xs); border-radius: 50%;
+  background: var(--swatch-other); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-ink) 18%, transparent); vertical-align: -1px;
+}
+.master-row::before { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; }
+[data-metal="GOLD"]::before { background: var(--swatch-gold); }
+[data-metal="SILVER"]::before { background: var(--swatch-silver); }
+[data-metal="PLATINUM"]::before { background: var(--swatch-platinum); }
+.pill { background: color-mix(in oklab, var(--color-card) 80%, transparent); }
+.rate-board { background: color-mix(in oklab, var(--stain-3) 14%, var(--color-paper-2)); }
+
+/* rows and pages */
+button.cell:hover, .cell.clickable:hover, .master-row:hover { background: color-mix(in oklab, var(--stain-3) 10%, var(--color-paper-2)); }
+.list-card { border-top-color: var(--color-ink); }
+.empty-khata { align-items: start; }
+.empty-gem { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: color-mix(in oklab, var(--color-accent) 10%, var(--color-card)); color: var(--color-accent); }
+.empty-gem .ic { width: 28px; height: 28px; }
+.skeleton { display: grid; gap: var(--space-sm); padding: var(--space-md) 0; border-top: var(--rule-head) solid var(--color-ink); }
+.skeleton i { display: block; height: 56px; background: var(--color-paper-3); opacity: .55; animation: breathe 1.1s var(--ease-in-out) infinite alternate; }
+.skeleton i:nth-child(2) { animation-delay: .15s; }
+.skeleton i:nth-child(3) { animation-delay: .3s; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.stage[data-enter] > *, .stage[data-enter] .desk-col > *, .stage[data-enter] .side-panel { animation: rise var(--dur-long) var(--ease-out) both; }
+.stage[data-enter] > *:nth-child(2), .stage[data-enter] .desk-col > *:nth-child(2) { animation-delay: 60ms; }
+.stage[data-enter] > *:nth-child(3), .stage[data-enter] .desk-col > *:nth-child(3) { animation-delay: 120ms; }
+.stage[data-enter] .desk-col > *:nth-child(n+4) { animation-delay: 180ms; }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+.modal, .tour-card { animation: sheet-in var(--dur-long) var(--ease-out) both; }
+.modal:focus { outline: none; }
+
+/* a quiet confirmation after every save */
+.toast {
+  position: fixed; left: 50%; bottom: calc(var(--nav-h) + var(--space-lg) + env(safe-area-inset-bottom)); z-index: var(--z-toast);
+  max-width: calc(100vw - 32px); padding: var(--space-sm) var(--space-md); border-radius: var(--radius-pill);
+  background: var(--color-ink); color: var(--color-paper); font-size: var(--text-sm); box-shadow: var(--shadow-card);
+  opacity: 0; transform: translate(-50%, 8px); pointer-events: none;
+  transition: opacity var(--dur-short) var(--ease-out), transform var(--dur-short) var(--ease-out);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+@media (min-width: 768px) { .toast { bottom: var(--space-lg); } }
+@media print { .toast { display: none !important; } }

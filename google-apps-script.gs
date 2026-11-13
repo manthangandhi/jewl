@@ -17,6 +17,9 @@ const LICENSE_URL = "PASTE_LICENSE_URL_HERE";
 const SCRIPT_VERSION = "2026-11-13-karigar-customers";
 const PHOTO_FOLDER_PROP = "KARIGAR_PHOTO_FOLDER_ID";
 const MAX_PHOTO_BASE64 = 6000000;
+const PIN_FAIL_KEY = "karigar:pinfails";
+const MAX_PIN_FAILS = 8;
+const PIN_LOCK_SECONDS = 600;
 const LOCAL_TIMEZONE = "Asia/Kolkata";
 
 const HEADERS = {
@@ -94,9 +97,25 @@ function assertPin_(body) {
   if (!need || need.indexOf("PASTE_") === 0) {
     throw new Error("Set SCRIPT_PIN at the top of this script. The ledger will not open without it.");
   }
-  if (String((body && body.pin) || "").trim() !== need) {
+  // A 4-digit PIN can be guessed in minutes, so after too many misses the door stays shut for a while.
+  const cache = CacheService.getScriptCache();
+  const fails = Number(cache.get(PIN_FAIL_KEY) || 0);
+  if (fails >= MAX_PIN_FAILS) {
+    throw new Error("Too many wrong PINs. Wait 10 minutes, then try again.");
+  }
+  if (!sameText_(String((body && body.pin) || "").trim(), need)) {
+    cache.put(PIN_FAIL_KEY, String(fails + 1), PIN_LOCK_SECONDS);
     throw new Error("Wrong shop PIN");
   }
+  if (fails) cache.remove(PIN_FAIL_KEY);
+}
+
+function sameText_(a, b) {
+  // Compare every character so the time taken does not reveal how many were right.
+  let diff = a.length === b.length ? 0 : 1;
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
 }
 
 function assertLicense_() {
@@ -138,6 +157,23 @@ function doPost(e) {
     const body = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
     assertPin_(body);
     assertLicense_();
+    const writes = ["init", "save", "uploadPhoto", "deletePhoto", "seedDemo", "clearDemo"];
+    if (writes.indexOf(body.action) !== -1) return withLock_(function () { return dispatch_(body); });
+    return dispatch_(body);
+  } catch (err) {
+    return jsonOut_({ ok: false, unlocked: false, error: String(err) });
+  }
+}
+
+// Two phones saving at the same moment must not interleave their writes to the Sheet.
+function withLock_(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) throw new Error("The Sheet is busy saving for someone else. Please try again in a moment.");
+  try { return fn(); } finally { lock.releaseLock(); }
+}
+
+function dispatch_(body) {
+  try {
     if (body.action === "unlock") return jsonOut_({ ok: true, unlocked: true, version: SCRIPT_VERSION });
     if (body.action === "init") return jsonOut_(initLedger());
     if (body.action === "load") return jsonOut_(loadLedger_());
@@ -692,6 +728,16 @@ function photoFolder_() {
   return folder;
 }
 
+// The Drive permission is wide, so only ever touch files that live in Karigar's own photo folder.
+function assertPhotoFile_(file) {
+  const folderId = photoFolder_().getId();
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === folderId) return;
+  }
+  throw new Error("That file is not a Karigar photo");
+}
+
 function uploadPhoto_(body) {
   const data = String((body && body.data) || "");
   if (!data) throw new Error("No photo received");
@@ -708,6 +754,7 @@ function getPhoto_(body) {
   const id = String((body && body.fileId) || "").trim();
   if (!id) throw new Error("No photo id");
   const file = DriveApp.getFileById(id);
+  assertPhotoFile_(file);
   if (file.isTrashed()) throw new Error("This photo was deleted from Drive");
   const blob = file.getBlob();
   return { ok: true, version: SCRIPT_VERSION, dataUrl: "data:" + blob.getContentType() + ";base64," + Utilities.base64Encode(blob.getBytes()) };
@@ -717,7 +764,9 @@ function deletePhoto_(body) {
   const id = String((body && body.fileId) || "").trim();
   if (!id) return { ok: true, deleted: false };
   try {
-    DriveApp.getFileById(id).setTrashed(true);
+    const file = DriveApp.getFileById(id);
+    assertPhotoFile_(file);
+    file.setTrashed(true);
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: true, deleted: false };

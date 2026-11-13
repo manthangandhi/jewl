@@ -155,3 +155,38 @@ test('existing shops get a guided one-time Sheet update with PIN and license fil
   assert.match(js, /fillScriptConstants\(await res\.text\(\), \{ pin: state\.pin, licenseKey: key/);
   assert.match(js, /scriptOutdated/);
 });
+
+test('security: Drive access is confined, PIN guessing is throttled, writes are serialised', () => {
+  const gs = fs.readFileSync(path.join(pwa, 'google-apps-script.gs'), 'utf8');
+  // only files inside Karigar's own photo folder can be read or trashed
+  assert.match(gs, /function assertPhotoFile_/);
+  assert.match(gs, /const file = DriveApp\.getFileById\(id\);\s*assertPhotoFile_\(file\);/);
+  assert.match(gs, /file = DriveApp\.getFileById\(id\);\s*assertPhotoFile_\(file\);\s*file\.setTrashed/);
+  // PIN lockout and constant-time compare
+  assert.match(gs, /MAX_PIN_FAILS/);
+  assert.match(gs, /Too many wrong PINs/);
+  assert.match(gs, /sameText_\(/);
+  // two phones saving at once must not interleave
+  assert.match(gs, /LockService\.getScriptLock\(\)/);
+  for (const action of ['save', 'uploadPhoto', 'deletePhoto', 'seedDemo', 'clearDemo']) assert.match(gs, new RegExp(`"${action}"`));
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /safeSheetUrl/);
+  assert.doesNotMatch(js, /href="\$\{esc\(state\.spreadsheetUrl\)\}"/);
+});
+
+test('exported CSV cannot run a customer name as a spreadsheet formula', async () => {
+  const { reportCsv } = await import('../pwa/ledger-math.js');
+  const out = reportCsv({ lines: [{ date: '2026-01-01', name: '=HYPERLINK("http://x")', label: '+cmd', fig: 5 }, { date: '2026-01-02', name: 'Anita', label: 'Metal aaya', fig: -60, kind: 'metal' }] });
+  const rows = out.split('\n');
+  assert.match(rows[1], /"'=HYPERLINK/);
+  assert.match(rows[1], /"'\+cmd"/);
+  assert.match(rows[2], /"Anita"/);
+  assert.match(rows[2], /"-60 g"/);
+});
+
+test('customers, suppliers and metals are named the same way on every screen', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.doesNotMatch(js, /Add party|No parties yet|Search parties|Edit party|Delete party|Party name/);
+  assert.match(js, /Add supplier/);
+  assert.match(js, /titleCase\(t\)/);
+});

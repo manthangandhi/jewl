@@ -94,8 +94,8 @@ export function partyDisplayName(party) {
 
 export function assertPartyName(name) {
   const n = String(name || '').trim();
-  if (!n) throw new Error('Enter the party name');
-  if (isPhoneLike(n)) throw new Error('Name is the party, not the mobile. Put the number in Phone.');
+  if (!n) throw new Error('Enter the name');
+  if (isPhoneLike(n)) throw new Error('Type the name here, not the mobile number. Put the number in Phone.');
   return n;
 }
 

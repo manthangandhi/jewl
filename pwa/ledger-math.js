@@ -269,13 +269,18 @@ export function reportForRange({
 }
 
 export function reportCsv(report) {
-  const header = ['Date', 'Party', 'Type', 'Amount'];
+  const header = ['Date', 'Name', 'Type', 'Amount'];
   const rows = (report.lines || []).map((line) => [
     String(line.date || '').slice(0, 10),
     line.name,
     line.label,
     line.kind === 'metal' ? `${line.fig} g` : line.fig
   ]);
-  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  // A name that starts with = + - or @ would run as a formula when the CSV is opened in Excel or Sheets.
+  const cell = (v) => {
+    let text = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(text) && !/^-?[\d.,]+( g)?$/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
   return [header, ...rows].map((row) => row.map(cell).join(',')).join('\n');
 }
