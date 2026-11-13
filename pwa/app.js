@@ -1,5 +1,5 @@
 import { monthlyTrend, salesMix, topCustomers, duesAgeing, quietCustomers, repeatStats, returnRates, changePct, PERIODS, periodRange, monthsForRange, filterSales } from './insights.js';
-import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
+import { summarizeLedger, buildPassbook, metalValue, karigarStats, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
   SALE, RETURN, PAYMENT, EXCHANGE, computeBill, billBreakupText, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
   categoryTotals, salesPeriodTotals, validateSale, validatePayment, removeCustomerData
@@ -842,6 +842,26 @@ function loginScreen() {
   `);
 }
 
+function supplierMetalWorth(detail) {
+  const entries = Object.keys(detail.metalByPurity || {});
+  if (!entries.length) return '';
+  const v = metalValue(detail.metalByPurity, (t, p) => effRate(t, p).perGram);
+  const net = detail.payable - v.inr;
+  return `<div class="bh"><span>${v.inr < 0 ? 'Metal you owe them, at today’s rate' : 'That metal at today’s rate'}</span><strong>${v.inr ? money(Math.abs(v.inr)) : '—'}</strong>${v.inr ? `<small class="hint">${net === 0 ? 'Even with what you owe' : net > 0 ? `After this, you still owe about ${money(net)}` : `After this, they owe you about ${money(-net)}`}${v.unpriced.length ? '. Some metal has no rate yet.' : ''}</small>` : ''}</div>`;
+}
+
+function karigarCard(supplierId) {
+  const k = karigarStats(state.metal, supplierId);
+  if (!k.receipts && !k.issuedGrams) return '';
+  if (!k.wastageGrams && !k.labourInr) return '';
+  return `<section class="glance karigar-card" aria-label="Karigar record">
+    <div><span>Metal given</span><strong>${grams(k.issuedGrams)}</strong></div>
+    <div><span>Work received</span><strong>${grams(k.receivedGrams)}</strong></div>
+    <div><span>Wastage</span><strong>${grams(k.wastageGrams)} (${k.wastagePct}%)</strong></div>
+    <div><span>Labour charged</span><strong>${money(k.labourInr)}</strong></div>
+  </section>`;
+}
+
 function effRate(metalType, purity) {
   return effectiveRate({ master: state.metalMaster, snapshot: state.rates, adjust: state.rateAdjust }, metalType, purity);
 }
@@ -1437,7 +1457,9 @@ function supplierPassbook() {
     <section class="balance-hero tight">
       <div class="bh ${dir.tone}"><span>${dir.label || 'Square'}</span><strong>${money(dir.amount)}</strong></div>
       <div class="bh"><span>Metal with supplier</span><div>${metalPills(detail.metalByPurity) || '<strong>—</strong>'}</div></div>
+      ${supplierMetalWorth(detail)}
     </section>
+    ${karigarCard(detail.supplier.id)}
     ${recordActions()}
     <div class="settle-row"><button class="btn btn-soft" data-action="modal" data-modal="settle" type="button">${ic('check')}<span>Settle account</span></button></div>
     ${crm.quick}
@@ -1976,7 +1998,15 @@ function metalModal(direction) {
       <label>Metal<select name="metalType">${metalTypeOptions(e.metalType || 'GOLD')}</select></label>
       <label>Purity<select name="purity">${purityOptions(e.metalType || 'GOLD', e.purity || '22K')}</select></label>
       ${rateFor(e.metalType || 'GOLD', e.purity || '22K') ? `<p class="rate-hint">Master ${money(rateFor(e.metalType || 'GOLD', e.purity || '22K'))}/g</p>` : ''}
-      <label>Weight (grams)<input name="weightGrams" type="number" min="0.001" step="0.001" required inputmode="decimal" value="${esc(e.weightGrams || '')}"></label>
+      <label>${current === 'RECEIPT' ? 'Weight received (grams)' : 'Weight (grams)'}<input name="weightGrams" type="number" min="0.001" step="0.001" required inputmode="decimal" value="${esc(e.weightGrams || '')}"></label>
+      ${current === 'RECEIPT' ? `<details class="breakup" ${(e.wastageGrams || e.labourInr) ? 'open' : ''}>
+        <summary>Karigar wastage and labour (optional)</summary>
+        <p class="hint">Wastage is metal the karigar may keep. It is taken off what they owe you. Labour is added to what you owe them.</p>
+        <div class="field-row">
+          <label>Wastage allowed (grams)<input name="wastageGrams" type="number" min="0" step="0.001" inputmode="decimal" value="${esc(e.wastageGrams || '')}"></label>
+          <label>Labour charge (₹)<input name="labourInr" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(e.labourInr || '')}"></label>
+        </div>
+      </details>` : ''}
       <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
       <label>Note<input name="note" value="${esc(e.note || '')}"></label>
       <div class="form-actions">
@@ -2900,6 +2930,8 @@ async function submitForm(event) {
       state.metal = upsertById(state.metal, stamp({
         ...(state.editing || {}), id, supplierId: data.supplierId || state.supplierId, direction: data.direction,
         metalType: data.metalType, purity: data.purity, weightGrams: Number(data.weightGrams),
+        wastageGrams: data.direction === 'RECEIPT' ? Math.max(0, Number(data.wastageGrams || 0)) || '' : '',
+        labourInr: data.direction === 'RECEIPT' ? Math.max(0, Number(data.labourInr || 0)) || '' : '',
         date: data.date, note: data.note || ''
       }, isNew));
       markDirty('metal', id);

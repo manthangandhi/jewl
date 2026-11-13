@@ -1,4 +1,4 @@
-const CACHE_NAME = 'karigar-shell-v35';
+const CACHE_NAME = 'karigar-shell-v36';
 const CORE_ASSETS = [
   './',
   './index.html',

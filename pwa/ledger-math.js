@@ -22,7 +22,7 @@ export function assertPurity(metalType, purity, master) {
   if (!allowed.includes(purity)) throw new Error(`Invalid purity ${purity} for ${metalType}`);
 }
 
-export function payableInr(moneyRows, settlementRows, supplierId) {
+export function payableInr(moneyRows, settlementRows, supplierId, metalRows = []) {
   const money = moneyRows.filter((row) => row.supplierId === supplierId)
     .reduce((sum, row) => {
       if (row.type === 'OPENING' || row.type === 'PURCHASE') return sum + Number(row.amountInr || 0);
@@ -31,7 +31,9 @@ export function payableInr(moneyRows, settlementRows, supplierId) {
     }, 0);
   const settled = settlementRows.filter((row) => row.supplierId === supplierId)
     .reduce((sum, row) => sum + Number(row.moneyAmountInr || 0), 0);
-  return money - settled;
+  const labour = metalRows.filter((row) => row.supplierId === supplierId && row.direction === 'RECEIPT')
+    .reduce((sum, row) => sum + Number(row.labourInr || 0), 0);
+  return money - settled + labour;
 }
 
 export function metalByPurity(metalRows, settlementRows, supplierId) {
@@ -41,7 +43,7 @@ export function metalByPurity(metalRows, settlementRows, supplierId) {
     const key = `${row.metalType}:${row.purity}`;
     const grams = Number(row.weightGrams || 0);
     if (row.direction === 'OPENING' || row.direction === 'ISSUE') add(key, grams);
-    if (row.direction === 'RECEIPT') add(key, -grams);
+    if (row.direction === 'RECEIPT') add(key, -(grams + Number(row.wastageGrams || 0)));
   }
   for (const row of settlementRows.filter((item) => item.supplierId === supplierId)) {
     if (row.metalType && row.purity && Number(row.metalGrams || 0) > 0) {
@@ -49,6 +51,41 @@ export function metalByPurity(metalRows, settlementRows, supplierId) {
     }
   }
   return Object.fromEntries(Object.entries(balances).filter(([, grams]) => grams !== 0));
+}
+
+/**
+ * What the metal a supplier holds is worth at today's rate. `rateOf(metalType, purity)` gives rupees per gram or 0.
+ * Metal with no rate is listed in `unpriced` so it is never counted as free.
+ */
+export function metalValue(metalByPurityMap, rateOf) {
+  let inr = 0;
+  const unpriced = [];
+  for (const [key, grams] of Object.entries(metalByPurityMap || {})) {
+    const [type, purity] = key.split(':');
+    const rate = Number(rateOf(type, purity) || 0);
+    if (rate > 0) inr += grams * rate; else unpriced.push(key);
+  }
+  return { inr: Math.round(inr), unpriced };
+}
+
+/** A karigar's record: metal given, finished work received, wastage allowed and labour charged. */
+export function karigarStats(metalRows, supplierId) {
+  const s = { issuedGrams: 0, receivedGrams: 0, wastageGrams: 0, labourInr: 0, receipts: 0 };
+  for (const row of metalRows || []) {
+    if (row.supplierId !== supplierId) continue;
+    const g = Number(row.weightGrams || 0);
+    if (row.direction === 'ISSUE') s.issuedGrams += g;
+    if (row.direction === 'RECEIPT') {
+      s.receivedGrams += g;
+      s.wastageGrams += Number(row.wastageGrams || 0);
+      s.labourInr += Number(row.labourInr || 0);
+      s.receipts += 1;
+    }
+  }
+  const used = s.receivedGrams + s.wastageGrams;
+  s.wastagePct = used > 0 ? Math.round((s.wastageGrams / used) * 1000) / 10 : 0;
+  s.stillWithGrams = Math.max(0, s.issuedGrams - used);
+  return s;
 }
 
 export function skipInvalidMetalRow(row) {
@@ -72,7 +109,7 @@ function humanPartyName(party) {
 
 export function summarizeLedger(suppliers, money, metal, settlements) {
   const bySupplier = suppliers.map((supplier) => {
-    const payable = payableInr(money, settlements, supplier.id);
+    const payable = payableInr(money, settlements, supplier.id, metal);
     return {
       id: supplier.id,
       name: humanPartyName(supplier) || 'Party',
@@ -146,10 +183,10 @@ export function buildPassbook({ supplierId, money = [], metal = [], settlements 
       date: row.date,
       createdAt: row.createdAt,
       sort: eventTime(row),
-      amountInr: 0,
+      amountInr: row.direction === 'RECEIPT' ? Number(row.labourInr || 0) : 0,
       grams: Number(row.weightGrams || 0),
       label,
-      detail: `${row.metalType || ''} ${row.purity || ''}`.trim(),
+      detail: [`${row.metalType || ''} ${row.purity || ''}`.trim(), Number(row.wastageGrams || 0) ? `wastage ${Number(row.wastageGrams)} g` : '', Number(row.labourInr || 0) ? `labour ₹${Number(row.labourInr).toLocaleString('en-IN')}` : ''].filter(Boolean).join(', '),
       note: row.note || '',
       raw: row
     });

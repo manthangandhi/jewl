@@ -69,3 +69,30 @@ test('puritiesForType reads from the metal master', async () => {
   assert.deepEqual(puritiesForType(master, 'GOLD'), ['22K', '20K']);
   assert.deepEqual(puritiesForType(master, 'SILVER'), ['999']);
 });
+
+import { metalValue, karigarStats, metalByPurity as mbp2, payableInr as pay2, buildPassbook as bp2 } from '../pwa/ledger-math.js';
+
+test('karigar wastage lowers what the karigar owes and labour raises what the shop owes', () => {
+  const metal = [
+    { id: 'm1', supplierId: 's1', direction: 'ISSUE', metalType: 'GOLD', purity: '22K', weightGrams: 100, date: '2026-11-01' },
+    { id: 'm2', supplierId: 's1', direction: 'RECEIPT', metalType: 'GOLD', purity: '22K', weightGrams: 95, wastageGrams: 3, labourInr: 4000, date: '2026-11-05' }
+  ];
+  assert.deepEqual(mbp2(metal, [], 's1'), { 'GOLD:22K': 2 });
+  assert.equal(pay2([], [], 's1', metal), 4000);
+  assert.equal(pay2([], [], 's1'), 0);
+  const k = karigarStats(metal, 's1');
+  assert.equal(k.wastageGrams, 3);
+  assert.equal(k.wastagePct, 3.1);
+  assert.equal(k.labourInr, 4000);
+  assert.equal(k.stillWithGrams, 2);
+  const line = bp2({ supplierId: 's1', metal }).find((l) => l.id === 'm2');
+  assert.equal(line.amountInr, 4000);
+  assert.match(line.detail, /wastage 3 g, labour ₹4,000/);
+});
+
+test('metal a supplier holds is valued at today\'s rate and unpriced metal is flagged, not counted as free', () => {
+  const v = metalValue({ 'GOLD:22K': 10, 'SILVER:999': 100, 'PLATINUM:950': 1 }, (t, p) => (t === 'GOLD' ? 6500 : t === 'SILVER' ? 90 : 0));
+  assert.equal(v.inr, 74000);
+  assert.deepEqual(v.unpriced, ['PLATINUM:950']);
+  assert.deepEqual(metalValue({}, () => 1), { inr: 0, unpriced: [] });
+});
