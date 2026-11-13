@@ -20,6 +20,7 @@ import {
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
 import { admitUnlock } from './shop-auth.js';
+import { isConfiguredUrl, verifyDirect, decide, planNotice, whyBlocked, RECHECK_MINUTES } from './license.js';
 import { resolveTourClick, applyTourNav } from './tour.js';
 import { buildPartyKhataDoc, partyKhataPrintHtml, printPartyKhataHtml, sharePartyKhataPdf } from './party-khata-print.js';
 
@@ -31,6 +32,8 @@ const TOUR_KEY = 'karigar.tourDone';
 const TEXT_KEY = 'karigar.bigText';
 const SHOP_NAME_KEY = 'karigar.shopName';
 const LICENSE_KEY_STORE = 'karigar.licenseKey';
+const LICENSE_OK_KEY = 'karigar.licenseOkAt';
+const SUPPORT_EMAIL = 'manthangandhi0@gmail.com';
 const RATES_KEY = 'karigar.liveRates';
 const ADJUST_KEY = 'karigar.rateAdjust';
 const TOUR = [
@@ -79,6 +82,11 @@ const state = {
   rateAdjust: { ...DEFAULT_ADJUST },
   adjustOpen: false,
   installEvent: null,
+  licenseBlock: null,
+  licenseNote: '',
+  licenseVerdict: null,
+  licenseCheckedAt: 0,
+  scriptLicenseKey: '',
   calibrateNote: '',
   customerSearch: '',
   custSummary: null,
@@ -260,7 +268,14 @@ async function sheetsRequest(payload) {
   if (/^\s*</.test(text) || /that.?s an error/i.test(text)) throw new Error(googleHttpErrorMessage(res.status || 401, text));
   let data;
   try { data = JSON.parse(text); } catch { throw new Error(googleHttpErrorMessage(res.status, text)); }
-  if (!data.ok) throw new Error(data.error || 'Unknown error');
+  if (!data.ok) {
+    const message = data.error || 'Unknown error';
+    if (/LICENSE_(PAUSED|MISSING)|paused for this shop|not licensed/i.test(message)) {
+      lockForLicense({ verdict: { allowed: false, status: 'INACTIVE', trialEndsAt: '', paidUntil: '', error: '' }, key: licenseKey() });
+    }
+    throw new Error(message);
+  }
+  if (data.license) state.licenseVerdict = data.license;
   return data;
 }
 
@@ -625,6 +640,7 @@ function savedLine() {
 }
 
 function landing() {
+  if (state.licenseBlock) return licenseScreen();
   if (!state.sheetsUrl && state.gate === 'choice') return gateChoice();
   if (state.gate === 'setup') return setupWizard();
   return loginScreen();
@@ -1614,6 +1630,8 @@ function render() {
   // Only a change of page eases in; typing in a search box must not make the list flash.
   const enter = state.lastView !== state.view + ':' + (state.supplierId || state.customerId || '');
   state.lastView = state.view + ':' + (state.supplierId || state.customerId || '');
+  const plan = planNotice(state.licenseVerdict);
+  const planBanner = plan ? `<div class="notice warn plan-note">${ic('bell')}<span>${esc(plan)} <a href="mailto:${SUPPORT_EMAIL}?subject=Karigar%20plan">Contact support to keep using Karigar.</a></span></div>` : '';
   root.innerHTML = `<div class="shop">
     <header class="appbar">
       <div class="brand"><span class="brand-mark">${ic('gem')}</span> <span>${esc(state.shopName || 'Karigar')}</span></div>
@@ -1638,6 +1656,7 @@ function render() {
     <div class="shop-body">
       ${rateBoard()}
       <main class="stage" ${enter ? 'data-enter' : ''}>
+        ${planBanner}
         ${outdated}
         ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
         ${viewContent()}
@@ -2376,6 +2395,15 @@ function bind() {
     }
   };
   window.onkeydown = null;
+  const licenseForm = root.querySelector('#license-form');
+  if (licenseForm) {
+    licenseForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const btn = licenseForm.querySelector('button');
+      if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+      await recheckLicense(String(licenseForm.elements.licenseKey.value || '').trim());
+    };
+  }
   const pinEntry = root.querySelector('input.pin-entry');
   const showPin = root.querySelector('#show-pin');
   if (pinEntry && showPin) {
@@ -2568,6 +2596,7 @@ async function submitForm(event) {
       forgetLocalPin();
       if (!typed) throw new Error('Enter the shop PIN');
       const verified = await verifyPin((payload) => sheetsRequest(payload));
+      state.scriptLicenseKey = verified.data?.licenseKey || '';
       if (!admitUnlock({ typedPin: typed, remote: verified }).enter) {
         state.pin = '';
         forgetSessionUnlock();
@@ -2762,7 +2791,110 @@ async function submitForm(event) {
   }
 }
 
+let licenseUrlCache = null;
+
+async function licenseServerUrl() {
+  if (licenseUrlCache !== null) return licenseUrlCache;
+  try {
+    const res = await fetch('./license-url.txt', { cache: 'no-store' });
+    const text = res.ok ? (await res.text()).trim().split('\n')[0].trim() : '';
+    licenseUrlCache = isConfiguredUrl(text) ? text : '';
+  } catch {
+    licenseUrlCache = '';
+  }
+  return licenseUrlCache;
+}
+
+function licenseKey() {
+  try { return localStorage.getItem(LICENSE_KEY_STORE) || state.scriptLicenseKey || ''; } catch { return state.scriptLicenseKey || ''; }
+}
+
+/** Hide the books and show why. Nothing is deleted: the Google Sheet stays the owner's. */
+function lockForLicense(info) {
+  state.licenseBlock = info;
+  state.licenseNote = '';
+  state.error = null;
+  state.unlocked = false;
+  state.pin = '';
+  state.modal = null;
+  state.editing = null;
+  state.view = 'today';
+  forgetSessionUnlock();
+  forgetLocalPin();
+  if (!info.offline) { try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ } }
+  landing();
+}
+
+/**
+ * Ask the license server about this shop. True when the app may carry on.
+ * The app does this itself, so an expired plan is noticed within minutes, whatever the shop's own script does.
+ */
+async function checkLicense() {
+  const url = await licenseServerUrl();
+  if (!url) return true; // this copy has no license server (development): nothing to enforce
+  const key = licenseKey();
+  if (!key) { lockForLicense({ needsKey: true }); return false; }
+  state.licenseCheckedAt = Date.now();
+  const result = await verifyDirect(fetch, url, key);
+  let lastOk = 0;
+  try { lastOk = Number(localStorage.getItem(LICENSE_OK_KEY) || 0); } catch { /* ignore */ }
+  const outcome = decide({ result, lastOkAt: lastOk, now: Date.now() });
+  if (outcome === 'allowed') {
+    try { localStorage.setItem(LICENSE_OK_KEY, String(Date.now())); localStorage.setItem(LICENSE_KEY_STORE, key); } catch { /* ignore */ }
+    state.licenseVerdict = result.verdict;
+    state.licenseBlock = null;
+    return true;
+  }
+  if (outcome === 'grace') return true;
+  lockForLicense({ verdict: result.verdict, offline: outcome === 'offline', key });
+  return false;
+}
+
+setInterval(() => { if (state.unlocked) checkLicense(); }, RECHECK_MINUTES * 60000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.unlocked && Date.now() - state.licenseCheckedAt > 2 * 60000) checkLicense();
+});
+
+function licenseScreen() {
+  const b = state.licenseBlock || {};
+  const mail = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Karigar plan')}`;
+  let body;
+  if (b.needsKey) {
+    body = `<h1>Enter your license key</h1>
+      <p>Karigar needs the license key your provider gave you before it can open your books.</p>`;
+  } else if (b.offline) {
+    body = `<h1>Connect to the internet</h1>
+      <p>Karigar could not check your plan, and it has been a while since the last check. Connect to the internet and try again.</p>`;
+  } else {
+    body = `<h1>Your Karigar plan has ended</h1>
+      <p>${esc(whyBlocked(b.verdict))}</p>
+      <p>Your books are safe. Nothing has been deleted, and they are still in your own Google Sheet. Contact us to start your plan again.</p>`;
+  }
+  onboardShell(`
+    <span class="license-ic">${ic('lock')}</span>
+    ${body}
+    ${state.licenseNote ? `<div class="notice">${esc(state.licenseNote)}</div>` : ''}
+    <form id="license-form" data-own>
+      <label>${b.needsKey ? 'License key' : 'Have a new license key?'}
+        <input name="licenseKey" autocomplete="off" placeholder="k-…" ${b.needsKey ? 'required' : ''} value="${b.needsKey ? '' : ''}">
+      </label>
+      <button class="btn btn-primary btn-block" type="submit">${ic('check')}<span>${b.needsKey ? 'Continue' : 'Check again'}</span></button>
+    </form>
+    ${b.needsKey || b.offline ? '' : `<p class="forgot"><a href="${esc(mail)}">Email support to renew</a></p>`}
+    <p class="setup-toggle"><a class="btn-plain" href="./about.html" target="_blank" rel="noopener">${ic('shield')}<span>About and support</span></a></p>
+  `);
+}
+
+async function recheckLicense(newKey) {
+  if (newKey) { try { localStorage.setItem(LICENSE_KEY_STORE, newKey); } catch { /* ignore */ } }
+  state.licenseNote = '';
+  const ok = await checkLicense();
+  if (ok) { state.licenseBlock = null; state.error = null; state.gate = 'login'; landing(); }
+  else if (state.licenseBlock) { state.licenseNote = state.licenseBlock.offline ? 'Still no connection to check your plan.' : state.licenseBlock.needsKey ? 'Enter your license key to continue.' : 'That plan is not active yet.'; landing(); }
+}
+
 async function enterUnlocked() {
+  if (!(await checkLicense())) return;
   loadSavedRates();
   loadRates();
   const cache = readCache();
@@ -2800,6 +2932,7 @@ async function bootstrap() {
     landing();
     try {
       const verified = await verifyPin((payload) => sheetsRequest(payload));
+      state.scriptLicenseKey = verified.data?.licenseKey || '';
       if (admitUnlock({ typedPin: session.pin, remote: verified }).enter) {
         writeSessionUnlock();
         await enterUnlocked();

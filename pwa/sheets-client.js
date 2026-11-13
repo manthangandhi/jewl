@@ -97,6 +97,9 @@ export function explainLedgerError(raw) {
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(msg)) {
     return 'Could not reach Google. Check your internet. Your last entry is kept on this device and will be saved with your next change.';
   }
+  if (/LICENSE_UNREACHABLE/.test(msg)) {
+    return 'Karigar could not check your plan. Check the internet and try again.';
+  }
   if (/not licensed|license key|paused for this shop|not active/i.test(msg)) {
     return 'This shop is not licensed to use Karigar. Pay your Karigar provider; they will send a license key and set you Active. Your Google Sheet is still yours.';
   }

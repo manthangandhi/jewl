@@ -119,48 +119,78 @@ function sameText_(a, b) {
   return diff === 0;
 }
 
+const LICENSE_GRACE_MS = 72 * 3600 * 1000;
+const LICENSE_LAST_OK = "KARIGAR_LICENSE_LAST_OK";
+
+/**
+ * Ask the license server about this shop. Returns the verdict, or throws a LICENSE_ error.
+ * A "yes" is remembered for 2 minutes. A "no" blocks at once. If the license server cannot be reached, a shop
+ * that was approved in the last 3 days keeps working, so a bad connection never locks out a paying shop.
+ */
 function assertLicense_() {
   const key = String(LICENSE_KEY || "").trim();
   const url = String(LICENSE_URL || "").trim();
   if (!key || key.indexOf("PASTE_") === 0 || !url || url.indexOf("PASTE_") === 0) {
-    throw new Error("This shop is not licensed. Pay for Karigar and enter the license key from your provider.");
+    throw new Error("LICENSE_MISSING: This shop is not licensed. Pay for Karigar and enter the license key from your provider.");
   }
   const cache = CacheService.getScriptCache();
-  const cacheId = "lic:" + key;
+  const cacheId = "lic2:" + key;
   const hit = cache.get(cacheId);
-  if (hit === "1") return;
-  if (hit === "0") throw new Error("Karigar is paused for this shop. Contact your Karigar provider.");
-  let res;
+  if (hit) {
+    let cached = {};
+    try { cached = JSON.parse(hit); } catch (err) { cached = {}; }
+    if (cached.allowed === true) return cached;
+    throw new Error("LICENSE_PAUSED: Karigar is paused for this shop. Contact your Karigar provider.");
+  }
+  const props = PropertiesService.getScriptProperties();
+  let data = null;
   try {
-    res = UrlFetchApp.fetch(url, {
+    const res = UrlFetchApp.fetch(url, {
       method: "post",
       contentType: "text/plain;charset=utf-8",
       payload: JSON.stringify({ action: "verify", key: key }),
       muteHttpExceptions: true,
       followRedirects: true
     });
+    if (res.getResponseCode() === 200) data = JSON.parse(res.getContentText() || "{}");
   } catch (err) {
-    throw new Error("You do not have permission to call UrlFetchApp.fetch. Required permissions: https://www.googleapis.com/auth/script.external_request");
+    data = null;
   }
-  let data = {};
-  try { data = JSON.parse(res.getContentText() || "{}"); } catch (err) { data = {}; }
-  const status = String((data && data.status) || "").toUpperCase();
-  const allowed = data && data.allowed === true && (status === "" || status === "ACTIVE" || status === "TRIAL");
+  if (!data || data.ok !== true) {
+    // The license server could not be reached or answered with nonsense.
+    let last = null;
+    try { last = JSON.parse(props.getProperty(LICENSE_LAST_OK) || "null"); } catch (err) { last = null; }
+    if (last && last.verdict && Date.now() - Number(last.at || 0) < LICENSE_GRACE_MS) {
+      return Object.assign({}, last.verdict, { grace: true });
+    }
+    throw new Error("LICENSE_UNREACHABLE: Karigar could not check this shop's plan. Check the internet and try again.");
+  }
+  const status = String(data.status || "").toUpperCase();
+  const allowed = data.allowed === true && (status === "" || status === "ACTIVE" || status === "TRIAL");
+  const verdict = {
+    allowed: allowed,
+    status: status,
+    shopName: String(data.shopName || ""),
+    trialEndsAt: String(data.trialEndsAt || ""),
+    paidUntil: String(data.paidUntil || "")
+  };
   if (!allowed) {
-    cache.put(cacheId, "0", 60);
-    throw new Error("Karigar is paused for this shop. Contact your Karigar provider.");
+    cache.put(cacheId, JSON.stringify(verdict), 60);
+    throw new Error("LICENSE_PAUSED: Karigar is paused for this shop. Contact your Karigar provider.");
   }
-  cache.put(cacheId, "1", 300);
+  cache.put(cacheId, JSON.stringify(verdict), 120);
+  props.setProperty(LICENSE_LAST_OK, JSON.stringify({ at: Date.now(), verdict: verdict }));
+  return verdict;
 }
 
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
     assertPin_(body);
-    assertLicense_();
+    const lic = assertLicense_();
     const writes = ["init", "save", "uploadPhoto", "deletePhoto", "seedDemo", "clearDemo"];
-    if (writes.indexOf(body.action) !== -1) return withLock_(function () { return dispatch_(body); });
-    return dispatch_(body);
+    if (writes.indexOf(body.action) !== -1) return withLock_(function () { return dispatch_(body, lic); });
+    return dispatch_(body, lic);
   } catch (err) {
     return jsonOut_({ ok: false, unlocked: false, error: String(err) });
   }
@@ -173,11 +203,11 @@ function withLock_(fn) {
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
-function dispatch_(body) {
+function dispatch_(body, lic) {
   try {
-    if (body.action === "unlock") return jsonOut_({ ok: true, unlocked: true, version: SCRIPT_VERSION });
+    if (body.action === "unlock") return jsonOut_({ ok: true, unlocked: true, version: SCRIPT_VERSION, license: lic, licenseKey: String(LICENSE_KEY || "") });
     if (body.action === "init") return jsonOut_(initLedger());
-    if (body.action === "load") return jsonOut_(loadLedger_());
+    if (body.action === "load") { const out = loadLedger_(); out.license = lic; return jsonOut_(out); }
     if (body.action === "save") return jsonOut_(saveLedger_(body));
     if (body.action === "uploadPhoto") return jsonOut_(uploadPhoto_(body));
     if (body.action === "getPhoto") return jsonOut_(getPhoto_(body));

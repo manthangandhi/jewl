@@ -167,3 +167,13 @@ Fix:
 7. Hard-refresh Karigar at http://localhost:4173 and paste the same `/exec` URL in Setup.
 
 The PWA now loads with GET `?action=load` and never sends Google cookies (`credentials: omit`), which avoids the multi-account 401.
+
+
+## How the license is enforced
+
+- **The app checks it itself.** When Karigar opens, and every 5 minutes while it is open (and when you come back to the tab), it asks your license server whether this shop's key is active. If the answer is no, the books are hidden at once and the owner sees "Your Karigar plan has ended". Nothing is deleted. The Google Sheet is still theirs.
+- **The shop's script checks it too.** Every save and load is checked, a "yes" is remembered for 2 minutes, and a "no" blocks immediately.
+- **A bad connection does not lock out a paying shop.** If the license server cannot be reached, a shop that was approved in the last 72 hours keeps working. After that it asks for an internet connection.
+- **Warnings.** In the last 7 days of a trial or a paid period, the owner sees "Your trial ends in N days" with a support link.
+- **To expire a shop for testing:** in the license Sheet set the shop's `status` to `INACTIVE`, or set `paidUntil` (or `trialEndsAt` for a trial) to a date in the past. It locks within about 2 minutes for an open tab. To renew, run `markPaid('the-key')` in the license script, or set `status` to `ACTIVE` with a future `paidUntil`.
+- **An honest limit.** The shop's script and the books live in the shop's own Google account, so a technical owner could edit their own copy of the script, or host their own copy of the app. This design makes lapsed plans stop working for ordinary owners and raises the bar for everyone else. It cannot stop a determined developer. Contracts and the relationship do the rest.

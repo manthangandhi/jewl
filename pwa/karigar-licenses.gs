@@ -15,6 +15,8 @@
  *
  * They stop paying / 30 days lapse:
  *   Next verify writes status INACTIVE. Their khata file is untouched.
+ *   To expire a shop by hand: set its status to INACTIVE, or put a past date in paidUntil / trialEndsAt.
+ *   The app asks every 5 minutes, so an open tab locks within about 2-5 minutes.
  *
  * Optional: Triggers → From this script → expireStaleLicenses → Day timer 1.
  */

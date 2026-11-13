@@ -760,3 +760,10 @@ details.adjust .premium-row { padding: var(--space-xs) 0 var(--space-md); }
   .lock-rates strong { font-size: var(--text-lg); }
 }
 @media (max-width: 380px) { .lock-rates ul { gap: var(--space-xs); } .lock-rates li > span { font-size: var(--text-xs); } }
+
+/* ================= plan ended / plan notice ================= */
+.license-ic { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: var(--space-md); border: var(--rule-hair) solid var(--color-ink); border-radius: 50%; }
+.license-ic .ic { width: 24px; height: 24px; }
+.plan-note { display: flex; align-items: flex-start; gap: var(--space-sm); }
+.plan-note .ic { flex: 0 0 auto; margin-top: var(--space-3xs); color: var(--color-accent); }
+.plan-note a { color: var(--color-accent); }
