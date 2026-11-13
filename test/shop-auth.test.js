@@ -77,36 +77,3 @@ test('a later session with a load payload still stays locked', async () => {
   }).enter, false);
 });
 
-test('hardware keyboard digits and Backspace edit the PIN', async () => {
-  const { applyPinKey } = await import('../pwa/shop-auth.js');
-  assert.equal(applyPinKey('', '1'), '1');
-  assert.equal(applyPinKey('12', '3'), '123');
-  assert.equal(applyPinKey('1234', 'Backspace'), '123');
-  assert.equal(applyPinKey('12345678', '9'), '12345678');
-  assert.equal(applyPinKey('12', 'a'), '12');
-});
-
-test('PIN keyboard is live on the lock screen even when focus is not in an input', async () => {
-  const { shouldHandlePinKeyboard } = await import('../pwa/shop-auth.js');
-  assert.equal(shouldHandlePinKeyboard({ key: '4' }, { unlocked: false, gate: 'login', target: { tagName: 'BODY' } }), true);
-  assert.equal(shouldHandlePinKeyboard({ key: 'Enter' }, { unlocked: false, gate: 'login', target: { tagName: 'BODY' } }), true);
-  assert.equal(shouldHandlePinKeyboard({ key: '4' }, { unlocked: true, gate: 'login', target: { tagName: 'BODY' } }), false);
-  assert.equal(shouldHandlePinKeyboard({ key: '4' }, { unlocked: false, gate: 'login', target: { tagName: 'INPUT' } }), false);
-  assert.equal(shouldHandlePinKeyboard({ key: '4' }, { unlocked: false, gate: 'login', target: { tagName: 'INPUT', classList: { contains: (c) => c === 'pin-entry' } } }), true);
-});
-
-test('PIN keyboard works on the unlock form even if gate is still choice', async () => {
-  const { shouldHandlePinKeyboard } = await import('../pwa/shop-auth.js');
-  assert.equal(shouldHandlePinKeyboard({ key: '7' }, {
-    unlocked: false,
-    gate: 'choice',
-    pinScreen: true,
-    target: { tagName: 'MAIN' }
-  }), true);
-  assert.equal(shouldHandlePinKeyboard({ key: '7' }, {
-    unlocked: false,
-    gate: 'choice',
-    pinScreen: false,
-    target: { tagName: 'MAIN' }
-  }), false);
-});

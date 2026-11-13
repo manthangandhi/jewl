@@ -1,11 +1,16 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
+  SALE, RETURN, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
+  categoryTotals, salesPeriodTotals, validateSale, removeCustomerData
+} from './customer-math.js';
+import { compressImage, photoFileName } from './photo.js';
+import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
   dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName, assertPartyName
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
-import { admitUnlock, applyPinKey, shouldHandlePinKeyboard } from './shop-auth.js';
+import { admitUnlock } from './shop-auth.js';
 import { resolveTourClick, applyTourNav } from './tour.js';
 import { buildPartyKhataDoc, partyKhataPrintHtml, printPartyKhataHtml, sharePartyKhataPdf } from './party-khata-print.js';
 
@@ -14,15 +19,18 @@ const CACHE_KEY = 'karigar.ledgerCache';
 const PIN_FP_KEY = 'karigar.pinFp';
 const SESSION_UNLOCK_KEY = 'karigar.sessionUnlock';
 const TOUR_KEY = 'karigar.tourDone';
+const TEXT_KEY = 'karigar.bigText';
+const LICENSE_KEY_STORE = 'karigar.licenseKey';
 const TOUR = [
   { title: 'One card per party', body: 'A party is one karigar or supplier. Do not add another card for their phone number, or a separate card for gold vs silver. Cash and every metal sit on the same khata.' },
   { title: 'Hume dena / Unse lena', body: 'Hume dena = we owe them rupees. Unse lena = they owe us. Metal with the party shows as pills such as GOLD 22K and SILVER 999.' },
   { title: 'Purchase and payment', body: 'On Purchase you can save rupees, metal, or both together. “Gave metal” is metal you issued. “Got metal” is metal that came back. Add more metal lines for gold and silver in the same bill.' },
   { title: 'Give / Get metal', body: 'Use these when you only move metal, with no rupee amount. Repeat for any metal and any party.' },
+  { title: 'Customers', body: 'Open Customers to add the people who buy from you. On a customer, tap Sold when they buy and Returned when they bring something back. Pick the item (chain, ring, mangalsutra…), metal, weight and amount. You can take a photo of the item too.' },
   { title: 'Refresh data', body: 'Tap Refresh data to reload the Google Sheet. Browser refresh will PIN-check this tab. Lock signs you out.' }
 ];
 const root = document.querySelector('#app');
-const emptyTrack = () => ({ suppliers: [], money: [], metal: [], settlements: [], metalMaster: [] });
+const emptyTrack = () => ({ suppliers: [], money: [], metal: [], settlements: [], metalMaster: [], customers: [], sales: [], categories: [] });
 const state = {
   ...emptyLedger(),
   sheetsUrl: '',
@@ -44,7 +52,6 @@ const state = {
   lastSavedAt: '',
   saving: false,
   syncing: false,
-  lockDigits: '',
   metalMaster: seedMetalMaster([]),
   reportPreset: 'month',
   reportFrom: '',
@@ -52,6 +59,15 @@ const state = {
   partyFilter: 'all',
   dealMetalCount: 1,
   tourStep: null,
+  customerId: null,
+  customerSearch: '',
+  custSummary: null,
+  customerDetail: null,
+  pendingPhoto: null,
+  photoRemoved: false,
+  photoCache: {},
+  scriptOutdated: false,
+  bigText: false,
   dirty: emptyTrack(),
   deleted: emptyTrack()
 };
@@ -74,6 +90,11 @@ const initials = (name) => {
 };
 function ic(name) {
   const paths = {
+    sold: '<path d="M6 8h12l1 12H5z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
+    returned: '<path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/>',
+    update: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/>',
+    customers: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
     parties: '<path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1"/><circle cx="9" cy="7" r="3"/><path d="M22 19v-1a4 4 0 0 0-3-3.87"/><path d="M16 3.13a3 3 0 0 1 0 5.74"/>',
     today: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
     sheet: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>',
@@ -101,6 +122,14 @@ function metalTypeOptions(selected) {
   const list = types.length ? types : ['GOLD', 'SILVER'];
   return list.map((t) => `<option value="${esc(t)}" ${t === selected ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
+
+function categoryOptions(metalType, selected) {
+  const list = categoriesForType(state.categories, metalType || 'GOLD');
+  const withCurrent = selected && !list.includes(selected) ? [selected, ...list] : list;
+  return `<option value="">Choose…</option>${withCurrent.map((c) => `<option value="${esc(c)}" ${c === selected ? 'selected' : ''}>${esc(c)}</option>`).join('')}`;
+}
+
+const customerLabel = (c) => String(c?.name || '').trim() || 'Customer';
 
 function purityOptions(metalType, selected) {
   const list = puritiesForType(state.metalMaster, metalType || 'GOLD');
@@ -149,6 +178,19 @@ function refreshSummary() {
   } else {
     state.detail = null;
   }
+  state.custSummary = summarizeCustomers(state.customers, state.sales);
+  if (state.view === 'customer' && state.customerId) {
+    const customer = state.customers.find((c) => c.id === state.customerId);
+    const row = state.custSummary.byCustomer.find((r) => r.id === state.customerId);
+    state.customerDetail = customer ? {
+      customer,
+      balance: row?.balance || 0,
+      metalNet: row?.metalNet || {},
+      passbook: buildCustomerPassbook(customer.id, state.sales)
+    } : null;
+  } else {
+    state.customerDetail = null;
+  }
 }
 
 async function sheetsRequest(payload) {
@@ -175,7 +217,10 @@ function applyLoaded(data) {
     money: Array.isArray(data.money) ? data.money : [],
     metal: Array.isArray(data.metal) ? data.metal : [],
     settlements: Array.isArray(data.settlements) ? data.settlements : [],
-    metalMaster: seedMetalMaster(Array.isArray(data.metalMaster) ? data.metalMaster : [])
+    metalMaster: seedMetalMaster(Array.isArray(data.metalMaster) ? data.metalMaster : []),
+    customers: Array.isArray(data.customers) ? data.customers : [],
+    sales: Array.isArray(data.sales) ? data.sales : [],
+    categories: seedCategories(Array.isArray(data.categories) ? data.categories : [])
   };
   const cleaned = dedupePartyLedger(incoming);
   const before = (incoming.suppliers || []).map((s) => `${s.id}|${s.name}|${s.phone}`).join(';');
@@ -188,6 +233,9 @@ function applyLoaded(data) {
   state.metal = cleaned.metal;
   state.settlements = cleaned.settlements;
   state.metalMaster = cleaned.metalMaster;
+  state.customers = incoming.customers;
+  state.sales = incoming.sales;
+  state.categories = incoming.categories;
   state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl || '';
   state.lastSavedAt = data.lastSavedAt || data.meta?.lastSavedAt || state.lastSavedAt;
   state.unlocked = true;
@@ -230,9 +278,52 @@ async function copyOwnerScript() {
   } catch {
     throw new Error('Allow clipboard, or copy from the Apps Script file in the project.');
   }
+  try { localStorage.setItem(LICENSE_KEY_STORE, state.setupDraft.licenseKey); } catch { /* ignore */ }
   state.setupDraft.copied = true;
   state.error = null;
   landing();
+}
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    throw new Error('Your browser did not allow copying. Allow clipboard access and try again.');
+  }
+}
+
+function flashButton(btn, text) {
+  if (!btn) return;
+  const label = btn.querySelector('span') || btn;
+  const old = label.textContent;
+  label.textContent = text;
+  setTimeout(() => { label.textContent = old; }, 2200);
+}
+
+async function copyUpdatedScript() {
+  const btn = root.querySelector('[data-action="copy-update-script"]');
+  const key = String(root.querySelector('#upd-license')?.value || '').trim();
+  if (!key) throw new Error('Type your license key first (the one your Karigar provider sent).');
+  const res = await fetch('./google-apps-script.gs', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Could not load the new script. Check your internet and try again.');
+  let licenseUrl = '';
+  try {
+    const lic = await fetch('./license-url.txt', { cache: 'no-store' });
+    if (lic.ok) licenseUrl = (await lic.text()).trim().split('\n')[0].trim();
+  } catch { /* handled below */ }
+  if (!licenseUrl) throw new Error('This copy of Karigar has no license server set. Ask your Karigar provider.');
+  try { localStorage.setItem(LICENSE_KEY_STORE, key); } catch { /* ignore */ }
+  const filled = fillScriptConstants(await res.text(), { pin: state.pin, licenseKey: key, licenseUrl });
+  await writeClipboard(filled);
+  flashButton(btn, 'Copied ✓ — now paste it');
+}
+
+async function copyManifest() {
+  const btn = root.querySelector('[data-action="copy-update-manifest"]');
+  const res = await fetch('./appsscript.json', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Could not load the permissions file.');
+  await writeClipboard(await res.text());
+  flashButton(btn, 'Copied ✓');
 }
 
 function forgetLocalPin() {
@@ -273,9 +364,14 @@ async function refreshFromSheet() {
       money: mergeJournals(remote.money || [], state.money, { deletedIds: state.deleted.money, dirtyIds: state.dirty.money }),
       metal: mergeJournals(remote.metal || [], state.metal, { deletedIds: state.deleted.metal, dirtyIds: state.dirty.metal }),
       settlements: mergeJournals(remote.settlements || [], state.settlements, { deletedIds: state.deleted.settlements, dirtyIds: state.dirty.settlements }),
-      metalMaster: mergeJournals(remote.metalMaster || [], state.metalMaster, { deletedIds: state.deleted.metalMaster, dirtyIds: state.dirty.metalMaster })
+      metalMaster: mergeJournals(remote.metalMaster || [], state.metalMaster, { deletedIds: state.deleted.metalMaster, dirtyIds: state.dirty.metalMaster }),
+      customers: mergeJournals(remote.customers || [], state.customers, { deletedIds: state.deleted.customers, dirtyIds: state.dirty.customers }),
+      sales: mergeJournals(remote.sales || [], state.sales, { deletedIds: state.deleted.sales, dirtyIds: state.dirty.sales }),
+      categories: mergeJournals(remote.categories || [], state.categories, { deletedIds: state.deleted.categories, dirtyIds: state.dirty.categories })
     };
+    const outdated = !Array.isArray(remote.customers);
     applyLoaded(merged);
+    state.scriptOutdated = outdated;
     writeCache();
     state.error = null;
     if (state.needsDedupeSave) {
@@ -348,7 +444,10 @@ async function persist() {
       money: state.money,
       metal: state.metal,
       settlements: state.settlements,
-      metalMaster: state.metalMaster
+      metalMaster: state.metalMaster,
+      customers: state.customers,
+      sales: state.sales,
+      categories: state.categories
     });
     const data = await sheetsRequest({ action: 'save', ...payload });
     state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl;
@@ -486,8 +585,8 @@ function setupWizard() {
       ${err}
       <form id="setup-shop">
         <label>Shop name<input name="shopName" required value="${esc(d.shopName)}" placeholder="e.g. Mehta Jewellers"></label>
-        <label>Shop PIN<input name="pin" type="text" inputmode="numeric" autocomplete="new-password" required minlength="4" value="${esc(d.pin)}" placeholder="4 or more digits"></label>
-        <label>Type PIN again<input name="pin2" type="text" inputmode="numeric" autocomplete="new-password" required value="${esc(d.pin)}"></label>
+        <label>Shop PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" required minlength="4" value="${esc(d.pin)}" placeholder="4 or more digits"></label>
+        <label>Type PIN again<input name="pin2" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" required value="${esc(d.pin)}"></label>
         <button class="btn btn-primary">Continue</button>
       </form>`;
   } else if (state.setupStep === 2) {
@@ -553,28 +652,21 @@ function setupWizard() {
 
 function loginScreen() {
   const configured = Boolean(state.sheetsUrl);
-  const digits = String(state.lockDigits || '');
-  const dots = [0, 1, 2, 3].map((i) => `<span class="${digits[i] ? 'on' : ''}"></span>`).join('');
+  const askUrl = !configured || state.setupOpen;
   onboardShell(`
     <div class="brand"><span class="brand-mark">K</span> Karigar</div>
     <p class="eyebrow">Shop vault</p>
     <h1>Unlock</h1>
-    ${configured ? '<p class="pin-hint">Type the shop PIN on the keyboard, or tap the pad.</p>' : '<p>Paste the shop /exec URL, then PIN.</p>'}
+    ${configured ? '<p class="pin-hint">Type your shop PIN. Your phone or computer keyboard will open.</p>' : '<p>Paste the shop /exec URL, then PIN.</p>'}
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
-    <form id="login-form" autocomplete="off">
-      <input class="autofill-trap" name="username" autocomplete="username" tabindex="-1" aria-hidden="true" value="karigar-shop">
-      ${configured && !state.setupOpen ? '' : `<label>Web app URL (/exec)<input name="sheetsUrl" placeholder="https://script.google.com/macros/s/…/exec" ${configured ? '' : 'required'} value="${esc(state.sheetsUrl)}" autocomplete="off"></label>`}
-      <div class="pin-dots" aria-hidden="true">${dots}${digits.length > 4 ? `<em>+${digits.length - 4}</em>` : ''}</div>
+    <form id="login-form" autocomplete="on">
+      <input class="autofill-trap" type="text" name="username" autocomplete="username" tabindex="-1" aria-hidden="true" value="karigar-shop">
+      ${askUrl ? `<label>Web app URL (/exec)<input name="sheetsUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" ${configured ? '' : 'required'} value="${esc(state.sheetsUrl)}" autocomplete="off"></label>` : ''}
       <label class="pin-label">Shop PIN
-        <input name="shopLock" class="pin-entry" inputmode="numeric" autocomplete="one-time-code" maxlength="8" minlength="4" required value="${esc(digits)}" autocapitalize="off" spellcheck="false" ${configured && !state.setupOpen ? 'autofocus' : ''}>
+        <input name="shopLock" class="pin-entry" type="password" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="current-password" minlength="4" required ${askUrl ? '' : 'autofocus'} autocapitalize="off" spellcheck="false">
       </label>
-      <div class="pin-pad" aria-label="PIN pad">
-        ${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'go'].map((key) => (
-          key === 'go'
-            ? `<button class="btn btn-primary pin-go" id="login-submit">Unlock</button>`
-            : `<button type="button" class="pin-key" data-action="pin-key" data-key="${key}">${key === 'del' ? '←' : key}</button>`
-        )).join('')}
-      </div>
+      <label class="check-row"><input type="checkbox" id="show-pin"> <span>Show PIN</span></label>
+      <button class="btn btn-primary btn-block" id="login-submit">Unlock</button>
     </form>
     <p class="setup-toggle">
       ${configured ? `<button type="button" class="btn-plain" data-action="setup">Use a different Sheet</button>` : ''}
@@ -624,6 +716,151 @@ function recordActions() {
       <button type="button" data-action="modal" data-modal="receive">Get metal</button>
     </div>
   </div>`;
+}
+
+function customerRows() {
+  const q = state.customerSearch.trim().toLowerCase();
+  const rows = state.custSummary?.byCustomer || [];
+  if (!q) return rows;
+  return rows.filter((row) => row.name.toLowerCase().includes(q) || String(row.phone || '').toLowerCase().includes(q));
+}
+
+function customerTone(balance) {
+  if (balance > 0) return { label: 'Unse lena', hint: 'Customer owes us', amount: balance, tone: 'collect' };
+  if (balance < 0) return { label: 'Hume dena', hint: 'We owe customer', amount: -balance, tone: 'owe' };
+  return { label: 'Square', hint: 'Settled', amount: 0, tone: 'square' };
+}
+
+function saleActions() {
+  if (!state.customers.length) return '';
+  return `<div class="sale-bar" role="group" aria-label="Customer actions">
+    <button type="button" class="sale-btn sold" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>Sold</strong><small>Customer bought</small></span></button>
+    <button type="button" class="sale-btn returned" data-action="modal" data-modal="return">${ic('returned')}<span><strong>Returned</strong><small>Customer gave back</small></span></button>
+  </div>`;
+}
+
+function customersHome() {
+  const s = state.custSummary || {};
+  const rows = customerRows();
+  const month = salesPeriodTotals(state.sales, rangeForPreset('month'));
+  const recent = state.sales
+    .filter((row) => String(row.date || '').slice(0, 10) >= rangeForPreset('month').from)
+    .slice()
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .slice(0, 8);
+  const list = rows.length ? `<section class="list-card blotter grow">
+      <div class="list-head"><span>Customers</span><span>${rows.length}</span></div>
+      <div class="party-list">${rows.map((row) => {
+    const t = customerTone(row.balance);
+    return `<button type="button" class="cell party-row party-card ${t.tone}" data-customer="${esc(row.id)}">
+        <span class="avatar">${esc(initials(row.name))}</span>
+        <span class="cell-main party-body">
+          <span class="party-title-row"><strong class="party-name">${esc(row.name)}</strong></span>
+          ${row.phone ? `<small class="party-phone">${esc(row.phone)}</small>` : ''}
+          ${metalPills(row.metalNet)}
+        </span>
+        <span class="cell-trail party-bal ${t.tone}">${t.amount ? `<em class="bal-label">${t.label}</em><b class="bal-fig">${money(t.amount)}</b>` : '<em class="bal-label">Square</em><b class="zero">—</b>'}</span>
+        ${ic('chevron')}
+      </button>`;
+  }).join('')}</div>
+    </section>` : `<div class="empty-khata grow">
+      <p class="empty-title">${state.customers.length ? 'No match' : 'No customers yet'}</p>
+      <p class="lede">${state.customers.length ? 'Try another name or number.' : 'Add the people who buy from you. Then tap Sold or Returned on them.'}</p>
+      ${state.customers.length ? '' : '<button class="btn btn-primary" data-action="modal" data-modal="customer">Add customer</button>'}
+    </div>`;
+  return `
+    <div class="desk-split fill">
+      <div class="desk-col">
+        <section class="balance-hero">
+          <div class="bh collect"><span>Unse lena</span><strong>${money(s.customersOweInr || 0)}</strong></div>
+          <div class="bh owe"><span>Hume dena</span><strong>${money(s.weOweCustomersInr || 0)}</strong></div>
+        </section>
+        ${saleActions()}
+        <div class="filter-row">
+          <div class="search-bar">${ic('search')}<input class="search" data-scope="customer" name="search" value="${esc(state.customerSearch)}" placeholder="Search customers" aria-label="Search customers"></div>
+        </div>
+        ${list}
+      </div>
+      <aside class="side-panel">
+        <div class="list-head"><span>This month</span><button type="button" class="btn-plain" data-view="report">Report</button></div>
+        <div class="mini-stats">
+          <div><span>Sold</span><strong>${money(month.soldInr)}</strong></div>
+          <div><span>Returned</span><strong>${money(month.returnedInr)}</strong></div>
+          <div><span>Gold/silver sold</span><strong>${grams(month.soldGrams)}</strong></div>
+          <div><span>Taken back</span><strong>${grams(month.returnedGrams)}</strong></div>
+        </div>
+        <ol class="passbook-list tight">${recent.map((row) => `
+          <li class="cell clickable" data-edit="sale" data-id="${esc(row.id)}">
+            <span class="cell-main"><strong>${row.kind === RETURN ? 'Returned' : 'Sold'} · ${esc(row.category || '')}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))} · ${fmtDate(row.date)}</small></span>
+            <span class="cell-trail"><b>${money(row.amountInr)}</b></span>
+          </li>`).join('') || '<li class="empty-in">No sales this month</li>'}</ol>
+      </aside>
+    </div>
+    <button class="fab" data-action="modal" data-modal="customer" type="button" aria-label="Add customer">+</button>`;
+}
+
+function customerPassbook() {
+  const detail = state.customerDetail;
+  if (!detail?.customer) return '<div class="empty-khata">Customer not found.</div>';
+  const t = customerTone(detail.balance);
+  const lines = detail.passbook || [];
+  return `
+    <div class="desk-col fill">
+    <header class="party-head">
+      <button class="icon-btn back" data-view="customers" type="button" aria-label="Back">${ic('chevron')}</button>
+      <div class="party-id">
+        <span class="avatar lg">${esc(initials(customerLabel(detail.customer)))}</span>
+        <div>
+          <h1 class="party-name">${esc(customerLabel(detail.customer))}</h1>
+          ${detail.customer.phone ? `<p class="party-phone">${esc(detail.customer.phone)}</p>` : ''}
+        </div>
+      </div>
+      <div class="party-tools">
+        <button class="btn-plain" data-edit="customer" data-id="${esc(detail.customer.id)}" type="button">Edit</button>
+      </div>
+    </header>
+    <section class="balance-hero tight">
+      <div class="bh ${t.tone}"><span>${t.label}</span><strong>${money(t.amount)}</strong></div>
+      <div class="bh"><span>Bought (net metal)</span><div>${metalPills(detail.metalNet) || '<strong>—</strong>'}</div></div>
+    </section>
+    ${saleActions()}
+    <section class="list-card blotter grow">
+      <div class="list-head"><span>Sold and returned</span><span>${lines.length}</span></div>
+      ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
+        <li class="cell clickable" data-edit="sale" data-id="${esc(line.id)}">
+          <time class="pass-date">${esc(fmtDate(line.date))}</time>
+          <span class="cell-main">
+            <strong>${line.label}${line.hasPhoto ? ` <span class="photo-flag" title="Has photo">${ic('camera')}</span>` : ''}</strong>
+            <small>${esc(line.detail)}${line.note ? ` · ${esc(line.note)}` : ''}</small>
+          </span>
+          <span class="cell-trail">
+            <b class="${line.kind === 'return' ? 'owe' : 'collect'}">${money(line.amountInr)}</b>
+            <em class="hisab">Paid ${money(line.paidInr)} · Balance ${money(line.runningInr)}</em>
+          </span>
+        </li>`).join('')}</ol>` : '<div class="empty-in">No sales yet. Tap Sold when this customer buys.</div>'}
+    </section>
+    </div>`;
+}
+
+function customerSalesCard(range) {
+  const totals = salesPeriodTotals(state.sales, range);
+  if (!totals.count) return '';
+  const cats = categoryTotals(state.sales, range);
+  return `<section class="list-card">
+    <div class="list-head"><span>Customer sales by item</span><span>${totals.count}</span></div>
+    <div class="mini-stats cat-stats">
+      <div><span>Sold</span><strong>${money(totals.soldInr)}</strong></div>
+      <div><span>Returned</span><strong>${money(totals.returnedInr)}</strong></div>
+      <div><span>Weight sold</span><strong>${grams(totals.soldGrams)}</strong></div>
+      <div><span>Weight returned</span><strong>${grams(totals.returnedGrams)}</strong></div>
+    </div>
+    <div class="data-table cat-table">
+      <div class="th"><span>Item</span><span>Sold</span><span>Returned</span><span>Net</span></div>
+      ${cats.map((row) => `<div class="tr">
+        <span>${esc(row.category)} <small>${esc(row.metalType)}</small></span><span>${grams(row.soldGrams)}</span><span>${grams(row.returnedGrams)}</span><span>${grams(row.netGrams)}</span>
+      </div>`).join('')}
+    </div>
+  </section>`;
 }
 
 function partiesHome() {
@@ -802,6 +1039,7 @@ function reportView() {
         ${activity}
       </section>
     </div>
+    ${customerSalesCard(range)}
     </div>`;
 }
 
@@ -810,7 +1048,17 @@ function helpView() {
     <div class="list-head"><span>How this works</span><button type="button" class="btn-plain" data-action="tour-start">Start tour</button></div>
     <div class="help-body">
       <article class="help-item">
-        <h2>Parties</h2>
+        <h2>Customers</h2>
+        <p class="help-lead">People who buy from you.</p>
+        <p>Open Customers, add a name, then tap <strong>Sold</strong> when they buy and <strong>Returned</strong> when they bring something back. Pick the metal, the item (chain, ring, mangalsutra…), weight and rupees. Unse lena = the customer still owes you.</p>
+      </article>
+      <article class="help-item">
+        <h2>Photos</h2>
+        <p class="help-lead">Take a photo of the item.</p>
+        <p>On a sale or return, tap <strong>Take photo</strong> (phone camera) or <strong>Choose photo</strong>. The picture is saved in your own Google Drive, in a Karigar photos folder. Tap the entry later to see it again.</p>
+      </article>
+      <article class="help-item">
+        <h2>Suppliers</h2>
         <p class="help-lead">One name, one khata.</p>
         <p>Phone is optional and quiet. Gold, silver, and cash sit on the same card — never a second party for a metal or a mobile number.</p>
       </article>
@@ -850,8 +1098,8 @@ function helpView() {
         <p>The browser refresh button will ask for PIN again on this tab.</p>
       </article>
       <article class="help-item">
-        <h2>Masters</h2>
-        <p class="help-lead">Purities you use. Board rate is optional.</p>
+        <h2>Metals and categories</h2>
+        <p class="help-lead">Purities, item types, and optional board rate.</p>
         <p>These appear on Purchase and Give / Get metal. If you enter ₹ per gram, GOLD 22K etc. show under the header like the shop rate board. Empty rates stay off the header — they are not a second khata.</p>
       </article>
       <article class="help-item">
@@ -887,8 +1135,15 @@ function booksView() {
         <section class="list-card">
           <div class="list-head"><span>This shop</span></div>
           <button class="cell" data-view="masters" type="button">
-            <span class="cell-main"><strong>Metal master</strong><small>Purity and optional board rate</small></span>
+            <span class="cell-main"><strong>Metals and categories</strong><small>Gold, silver, purity, chains, rings…</small></span>
             ${ic('chevron')}
+          </button>
+          <button class="cell" data-action="modal" data-modal="updateSheet" type="button">
+            <span class="cell-main"><strong>Update my Google Sheet</strong><small>One-time, guided — needed for customers and photos</small></span>
+            ${ic('chevron')}
+          </button>
+          <button class="cell" data-action="text-size" type="button">
+            <span class="cell-main"><strong>${state.bigText ? 'Normal text size' : 'Bigger text'}</strong><small>Make everything easier to read</small></span>
           </button>
           <button class="cell danger" data-action="logout" type="button">
             <span class="cell-main"><strong>Lock</strong><small>PIN lock this device</small></span>
@@ -924,6 +1179,8 @@ function booksView() {
 
 function viewContent() {
   if (state.view === 'supplier') return supplierPassbook();
+  if (state.view === 'customer') return customerPassbook();
+  if (state.view === 'customers') return customersHome();
   if (state.view === 'report') return reportView();
   if (state.view === 'today') return reportView();
   if (state.view === 'masters') return mastersView();
@@ -934,29 +1191,30 @@ function viewContent() {
 
 function viewTitle() {
   if (state.view === 'report' || state.view === 'today') return 'Report';
-  if (state.view === 'masters') return 'Metal master';
+  if (state.view === 'masters') return 'Metals and categories';
+  if (state.view === 'customers') return 'Customers';
   if (state.view === 'books') return 'Sheet';
   if (state.view === 'help') return 'How this works';
-  if (state.view === 'supplier') return '';
-  return 'Parties';
+  if (state.view === 'supplier' || state.view === 'customer') return '';
+  return 'Suppliers';
 }
 
 function render() {
   if (!state.unlocked) return landing();
   const title = viewTitle();
-  const navParties = state.view === 'parties' || state.view === 'supplier' ? 'active' : '';
-  const navToday = state.view === 'report' || state.view === 'today' ? 'active' : '';
-  const navMasters = state.view === 'masters' ? 'active' : '';
-  const navBooks = state.view === 'books' ? 'active' : '';
-  const navHelp = state.view === 'help' ? 'active' : '';
+  const on = (...views) => (views.includes(state.view) ? 'active' : '');
+  const outdated = state.scriptOutdated
+    ? `<div class="notice warn"><strong>One-time update needed for customers and photos.</strong> Until then customers are not saved. <button type="button" class="btn btn-primary banner-btn" data-action="modal" data-modal="updateSheet">Show me how — step by step</button></div>`
+    : '';
   root.innerHTML = `<div class="shop">
     <aside class="shop-nav" aria-label="Shop">
       <div class="nav-brand"><span class="brand-mark">K</span> <span>Karigar</span></div>
-      <button class="nav-item nav-core ${navParties}" data-view="parties" type="button">${ic('parties')}<span>Parties</span></button>
-      <button class="nav-item nav-core ${navToday}" data-view="report" type="button">${ic('today')}<span class="nav-phone">Today</span><span class="nav-desk">Report</span></button>
-      <button class="nav-item ${navMasters}" data-view="masters" type="button">${ic('masters')}<span>Masters</span></button>
-      <button class="nav-item nav-core ${navBooks}" data-view="books" type="button">${ic('sheet')}<span>Sheet</span></button>
-      <button class="nav-item ${navHelp}" data-view="help" type="button">${ic('help')}<span>How to</span></button>
+      <button class="nav-item nav-core ${on('customers', 'customer')}" data-view="customers" type="button">${ic('customers')}<span>Customers</span></button>
+      <button class="nav-item nav-core ${on('parties', 'supplier')}" data-view="parties" type="button">${ic('parties')}<span>Suppliers</span></button>
+      <button class="nav-item nav-core ${on('report', 'today')}" data-view="report" type="button">${ic('today')}<span class="nav-phone">Today</span><span class="nav-desk">Report</span></button>
+      <button class="nav-item ${on('masters')}" data-view="masters" type="button">${ic('masters')}<span>Metals</span></button>
+      <button class="nav-item nav-core ${on('books')}" data-view="books" type="button">${ic('sheet')}<span>Sheet</span></button>
+      <button class="nav-item ${on('help')}" data-view="help" type="button">${ic('help')}<span>How to</span></button>
       <button class="nav-item nav-lock" data-action="logout" type="button">${ic('lock')}<span>Lock</span></button>
     </aside>
     <div class="shop-body">
@@ -968,12 +1226,14 @@ function render() {
           <button class="btn-refresh" data-action="refresh" type="button" ${state.syncing ? 'disabled' : ''} aria-label="Refresh data">
             ${ic('refresh')}<span>Refresh data</span>
           </button>
+          <button class="icon-btn text-size" data-action="text-size" type="button" aria-label="${state.bigText ? 'Normal text size' : 'Bigger text'}"><span aria-hidden="true">A<sup>${state.bigText ? '−' : '+'}</sup></span></button>
           <button class="icon-btn" data-view="help" type="button" aria-label="How this works">${ic('help')}</button>
           <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock">${ic('lock')}</button>
         </div>
       </header>
       ${rateBoard()}
       <main class="stage">
+        ${outdated}
         ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
         ${viewContent()}
       </main>
@@ -1127,6 +1387,159 @@ function settleModal() {
   </section></div>`;
 }
 
+function customerModal() {
+  const e = state.editing || {};
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${e.id ? 'Edit customer' : 'Add customer'}">
+    <div class="section-head"><h2>${e.id ? 'Edit customer' : 'Add customer'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <form id="data-form" data-kind="customer">
+      <label>Customer name<input name="name" required autocomplete="off" value="${esc(e.name || '')}" placeholder="Name of the customer"></label>
+      <label>Phone (optional)<input name="phone" type="tel" inputmode="tel" autocomplete="off" value="${esc(e.phone || '')}"></label>
+      <label>City / area (optional)<input name="city" autocomplete="off" value="${esc(e.city || '')}"></label>
+      <label>Notes (optional)<input name="notes" autocomplete="off" value="${esc(e.notes || '')}"></label>
+      <div class="form-actions">
+        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="customer">Delete customer</button>' : ''}
+        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </section></div>`;
+}
+
+function photoPreviewHtml() {
+  const e = state.editing || {};
+  if (state.pendingPhoto) return `<img src="${esc(state.pendingPhoto.dataUrl)}" alt="Photo of the item">`;
+  if (e.photoId && !state.photoRemoved) {
+    const cached = state.photoCache[e.photoId];
+    if (cached) return `<img src="${esc(cached)}" alt="Photo of the item">`;
+    return '<span class="muted">Loading photo…</span>';
+  }
+  return '<span class="muted">No photo yet</span>';
+}
+
+function hasPhotoNow() {
+  const e = state.editing || {};
+  return Boolean(state.pendingPhoto || (e.photoId && !state.photoRemoved));
+}
+
+function updatePhotoPreview() {
+  const box = root.querySelector('#photo-preview');
+  if (box) box.innerHTML = photoPreviewHtml();
+  const clear = root.querySelector('[data-action="photo-clear"]');
+  if (clear) clear.hidden = !hasPhotoNow();
+}
+
+async function loadSavedPhoto() {
+  const id = state.editing?.photoId;
+  if (!id || state.photoCache[id]) return;
+  try {
+    const res = await sheetsRequest({ action: 'getPhoto', fileId: id });
+    if (res.dataUrl) state.photoCache[id] = res.dataUrl;
+  } catch (error) {
+    state.photoCache[id] = '';
+    const box = root.querySelector('#photo-preview');
+    if (box && state.editing?.photoId === id) box.innerHTML = `<span class="muted">Could not load the photo (${esc(explainLedgerError(error))})</span>`;
+    return;
+  }
+  if (state.editing?.photoId === id) updatePhotoPreview();
+}
+
+function resetPhotoState() {
+  state.pendingPhoto = null;
+  state.photoRemoved = false;
+}
+
+function saleModal(modalKind) {
+  const e = state.editing || {};
+  const isEdit = Boolean(e.id);
+  const kind = e.kind || (modalKind === 'return' ? RETURN : SALE);
+  const isReturn = kind === RETURN;
+  const locked = Boolean(state.customerId) && !isEdit;
+  const metalType = e.metalType || 'GOLD';
+  const amountDefault = e.amountInr ?? '';
+  const paidDefault = isEdit ? (e.paidInr ?? '') : '';
+  const customerId = e.customerId || state.customerId || '';
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${isReturn ? 'Customer returned' : 'Customer bought'}">
+    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isReturn ? 'Customer returned' : 'Customer bought')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <form id="data-form" data-kind="sale">
+      ${locked ? `<input type="hidden" name="customerId" value="${esc(state.customerId)}">` : `<label>Customer<select name="customerId" required><option value="">Choose customer…</option>${state.customers.map((c) => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(customerLabel(c))}</option>`).join('')}</select></label>`}
+      ${isEdit ? `<label>Type<select name="kind">
+        <option value="SALE" ${!isReturn ? 'selected' : ''}>Sold</option>
+        <option value="RETURN" ${isReturn ? 'selected' : ''}>Returned</option>
+      </select></label>` : `<input type="hidden" name="kind" value="${kind}">`}
+      <div class="field-row">
+        <label>Metal<select name="metalType">${metalTypeOptions(metalType)}</select></label>
+        <label>Purity<select name="purity">${purityOptions(metalType, e.purity || (metalType === 'SILVER' ? '925' : metalType === 'PLATINUM' ? '950' : '22K'))}</select></label>
+      </div>
+      <label>Item<select name="category" required>${categoryOptions(metalType, e.category || '')}</select></label>
+      <label>Weight (grams)<input name="weightGrams" type="number" min="0.001" step="0.001" required inputmode="decimal" placeholder="e.g. 12.5" value="${esc(e.weightGrams || '')}"></label>
+      <label>${isReturn ? 'Value of returned item (₹)' : 'Bill amount (₹)'}<input name="amountInr" type="number" min="0" step="0.01" required inputmode="decimal" placeholder="e.g. 85000" value="${esc(amountDefault)}"></label>
+      <label>${isReturn ? 'Refunded to customer (₹)' : 'Received from customer (₹)'}<input name="paidInr" type="number" min="0" step="0.01" inputmode="decimal" data-touched="${isEdit ? '1' : ''}" placeholder="Same as bill if paid in full" value="${esc(paidDefault)}"></label>
+      <div class="photo-box">
+        <div class="photo-title">Photo of the item</div>
+        <div id="photo-preview" class="photo-preview">${photoPreviewHtml()}</div>
+        <div class="photo-actions">
+          <label class="btn btn-soft file-btn">${ic('camera')}<span>Take photo</span><input type="file" id="photo-camera" class="sr-only" accept="image/*" capture="environment"></label>
+          <label class="btn btn-soft file-btn"><span>Choose photo</span><input type="file" id="photo-gallery" class="sr-only" accept="image/*"></label>
+          <button type="button" class="btn-plain" data-action="photo-clear" ${hasPhotoNow() ? '' : 'hidden'}>Remove photo</button>
+        </div>
+      </div>
+      <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
+      <label>Note (optional)<input name="note" autocomplete="off" value="${esc(e.note || '')}" placeholder="Bill no. / remark"></label>
+      <div class="form-actions">
+        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="sale">Delete</button>' : ''}
+        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </section></div>`;
+}
+
+function categoryModal() {
+  const e = state.editing || {};
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${e.id ? 'Edit item type' : 'Add item type'}">
+    <div class="section-head"><h2>${e.id ? 'Edit item type' : 'Add item type'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <form id="data-form" data-kind="category">
+      <label>Metal<select name="metalType">${metalTypeOptions(e.metalType || 'GOLD')}</select></label>
+      <label>Item name<input name="category" required autocomplete="off" value="${esc(e.category || '')}" placeholder="Chain, Ring, Mangalsutra…"></label>
+      <label>Status<select name="status">
+        <option value="ACTIVE" ${e.status !== 'INACTIVE' ? 'selected' : ''}>Active</option>
+        <option value="INACTIVE" ${e.status === 'INACTIVE' ? 'selected' : ''}>Hidden</option>
+      </select></label>
+      <div class="form-actions">
+        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="category">Delete</button>' : ''}
+        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </section></div>`;
+}
+
+function updateSheetModal() {
+  let saved = '';
+  try { saved = localStorage.getItem(LICENSE_KEY_STORE) || ''; } catch { /* ignore */ }
+  const sheetLink = state.spreadsheetUrl
+    ? `<a class="btn btn-soft btn-block" href="${esc(state.spreadsheetUrl)}" target="_blank" rel="noopener">Open my Google Sheet</a>`
+    : '';
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Update my Google Sheet">
+    <div class="section-head"><h2>Update my Google Sheet</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <p class="lede">Do this once. Your old entries stay safe. Your PIN is filled in for you.</p>
+    ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
+    <ol class="steps-big">
+      <li><strong>Your license key</strong><span>The key your Karigar provider sent you.</span>
+        <input id="upd-license" autocomplete="off" placeholder="License key" value="${esc(saved)}"></li>
+      <li><strong>Copy the new script</strong>
+        <button type="button" class="btn btn-primary btn-block" data-action="copy-update-script">${ic('update')}<span>Copy new script</span></button></li>
+      <li><strong>Open your Sheet</strong><span>Extensions → Apps Script. Select everything, paste, press Save.</span>${sheetLink}</li>
+      <li><strong>Allow photos</strong><span>Project Settings (gear) → tick “Show appsscript.json”. Open that file, select all, then paste the permissions file:</span>
+        <button type="button" class="btn btn-soft btn-block" data-action="copy-update-manifest">Copy permissions file</button></li>
+      <li><strong>Run two things</strong><span>Pick <em>authorizeKarigar</em> → Run → Allow. Then pick <em>initLedger</em> → Run.</span></li>
+      <li><strong>Publish</strong><span>Deploy → Manage deployments → pencil → Version: New version → Deploy.</span></li>
+      <li><strong>Come back here</strong><span>Tap Refresh data. The yellow note disappears.</span></li>
+    </ol>
+    <div class="form-actions"><button type="button" class="btn btn-soft" data-action="close">Close</button></div>
+  </section></div>`;
+}
+
 function modal() {
   const kind = state.modal;
   if (kind === 'supplier') return supplierModal();
@@ -1135,6 +1548,10 @@ function modal() {
   if (kind === 'issue' || kind === 'receive' || kind === 'metal') return metalModal(kind === 'receive' ? 'RECEIPT' : 'ISSUE');
   if (kind === 'settle') return settleModal();
   if (kind === 'metalMaster') return metalMasterModal();
+  if (kind === 'updateSheet') return updateSheetModal();
+  if (kind === 'customer') return customerModal();
+  if (kind === 'sale' || kind === 'return') return saleModal(kind);
+  if (kind === 'category') return categoryModal();
   return '';
 }
 
@@ -1162,10 +1579,11 @@ function metalMasterModal() {
 function mastersView() {
   const rows = state.metalMaster || [];
   const groups = metalMasterGroups(rows);
+  const catGroups = metalMasterGroups((state.categories || []).map((row) => ({ ...row })));
   return `
     <div class="desk-col fill masters-page">
     <div class="page-head">
-      <p class="lede">Board rate is optional. When you enter ₹/g, it appears under the header like a shop rate board.</p>
+      <p class="lede">Metals and purities you trade in. Board rate is optional — when you enter ₹/g it shows under the header.</p>
       <button class="btn btn-primary" data-action="modal" data-modal="metalMaster" type="button">+ Metal</button>
     </div>
     ${groups.length ? groups.map(([type, items]) => `
@@ -1183,10 +1601,19 @@ function mastersView() {
             ${off ? '<span class="master-off">Off</span>' : ''}
           </button>`;
   }).join('')}</div>
-      </section>`).join('') : `<div class="empty-khata grow">
+      </section>`).join('') : `<div class="empty-khata">
       <p class="empty-title">No metals</p>
-      <p class="lede">Add gold, silver, or a purity you use on purchase and give / get metal.</p>
+      <p class="lede">Add gold, silver, platinum, or a purity you use.</p>
     </div>`}
+    <div class="page-head">
+      <p class="lede">Item types shown when you record a sale or return — chain, ring, mangalsutra and so on, for each metal.</p>
+      <button class="btn btn-primary" data-action="modal" data-modal="category" type="button">+ Item type</button>
+    </div>
+    ${catGroups.map(([type, items]) => `
+      <section class="list-card master-group">
+        <div class="list-head"><span>${esc(type)} items</span><span>${items.length}</span></div>
+        <div class="chip-cloud">${items.map((row) => `<button type="button" class="chip ${String(row.status || 'ACTIVE') === 'INACTIVE' ? 'dim' : ''}" data-edit="category" data-id="${esc(row.id)}">${esc(row.category)}</button>`).join('')}</div>
+      </section>`).join('')}
     </div>`;
 }
 
@@ -1198,7 +1625,6 @@ function stamp(row, isNew) {
 function logout() {
   state.unlocked = false;
   state.pin = '';
-  state.lockDigits = '';
   forgetLocalPin();
   forgetSessionUnlock();
   state.view = 'parties';
@@ -1206,9 +1632,24 @@ function logout() {
   landing();
 }
 
+function applyTextSize() {
+  document.documentElement.classList.toggle('big-text', Boolean(state.bigText));
+}
+
+async function trashPhotos(ids) {
+  const list = [...new Set((ids || []).filter(Boolean))];
+  await Promise.allSettled(list.map((fileId) => sheetsRequest({ action: 'deletePhoto', fileId })));
+}
+
+function requireNewScript(kind) {
+  if (state.scriptOutdated && ['customer', 'sale', 'category'].includes(kind)) {
+    throw new Error('Customers and photos need the newest Karigar script. Update the Apps Script (see the note at the top), then tap Refresh data.');
+  }
+}
+
 function bind() {
   root.onclick = async (event) => {
-    const target = event.target.closest('[data-view],[data-action],[data-supplier],[data-edit],[data-delete]');
+    const target = event.target.closest('[data-view],[data-action],[data-supplier],[data-customer],[data-edit],[data-delete]');
     const tourNav = resolveTourClick({
       action: target && target.dataset.action,
       clickedBackdrop: Boolean(event.target.classList && event.target.classList.contains('tour-backdrop'))
@@ -1233,9 +1674,20 @@ function bind() {
         render();
         return;
       }
+      if (target.dataset.customer) {
+        state.view = 'customer';
+        state.customerId = target.dataset.customer;
+        state.modal = null;
+        state.editing = null;
+        refreshSummary();
+        render();
+        return;
+      }
       if (target.dataset.view) {
         state.view = target.dataset.view;
         if (target.dataset.view !== 'supplier') state.supplierId = null;
+        if (target.dataset.view !== 'customer') state.customerId = null;
+        resetPhotoState();
         state.modal = null;
         state.editing = null;
         refreshSummary();
@@ -1245,10 +1697,13 @@ function bind() {
       if (target.dataset.edit) {
         const kind = target.dataset.edit;
         const id = target.dataset.id;
-        const list = kind === 'supplier' ? state.suppliers : kind === 'money' ? state.money : kind === 'metal' ? state.metal : kind === 'metalMaster' ? state.metalMaster : state.settlements;
+        const lists = { supplier: state.suppliers, money: state.money, metal: state.metal, metalMaster: state.metalMaster, customer: state.customers, sale: state.sales, category: state.categories };
+        const list = lists[kind] || state.settlements;
         state.editing = list.find((r) => r.id === id) || null;
         state.modal = kind === 'settle' ? 'settle' : kind;
+        resetPhotoState();
         render();
+        if (kind === 'sale') loadSavedPhoto();
         return;
       }
       if (target.dataset.delete) {
@@ -1256,14 +1711,20 @@ function bind() {
         return;
       }
       const action = target.dataset.action;
-      if (action === 'pin-key') {
-        state.lockDigits = applyPinKey(state.lockDigits, target.dataset.key);
-        landing();
+      if (action === 'close') { state.modal = null; state.editing = null; state.error = null; resetPhotoState(); render(); }
+      else if (action === 'text-size') {
+        state.bigText = !state.bigText;
+        try { localStorage.setItem(TEXT_KEY, state.bigText ? '1' : '0'); } catch { /* ignore */ }
+        applyTextSize();
+        render();
+      } else if (action === 'photo-clear') {
+        state.pendingPhoto = null;
+        state.photoRemoved = true;
+        updatePhotoPreview();
         return;
-      }
-      if (action === 'close') { state.modal = null; state.editing = null; render(); }
-      else if (action === 'modal') {
+      } else if (action === 'modal') {
         state.editing = null;
+        resetPhotoState();
         state.modal = target.dataset.modal;
         if (state.modal === 'purchase' || state.modal === 'payment') {
           state.dealMetalCount = 1;
@@ -1300,6 +1761,8 @@ function bind() {
         state.setupStep = Math.min(5, state.setupStep + 1);
         landing();
       } else if (action === 'copy-script') await copyOwnerScript();
+      else if (action === 'copy-update-script') await copyUpdatedScript();
+      else if (action === 'copy-update-manifest') await copyManifest();
       else if (action === 'preset') {
         state.reportPreset = target.dataset.preset;
         if (state.reportPreset !== 'custom') {
@@ -1320,33 +1783,36 @@ function bind() {
       render();
     }
   };
+  window.onkeydown = null;
   const pinEntry = root.querySelector('input.pin-entry');
-  if (pinEntry) {
-    pinEntry.oninput = () => {
-      state.lockDigits = String(pinEntry.value || '').replace(/\D/g, '').slice(0, 8);
-      landing();
+  const showPin = root.querySelector('#show-pin');
+  if (pinEntry && showPin) showPin.onchange = () => { pinEntry.type = showPin.checked ? 'text' : 'password'; pinEntry.focus(); };
+  if (pinEntry && !state.unlocked && !root.querySelector('input[name="sheetsUrl"]') && document.activeElement !== pinEntry) {
+    pinEntry.focus({ preventScroll: true });
+  }
+  for (const input of root.querySelectorAll('#photo-camera, #photo-gallery')) {
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      const box = root.querySelector('#photo-preview');
+      if (box) box.innerHTML = '<span class="muted">Preparing photo…</span>';
+      try {
+        state.pendingPhoto = await compressImage(file);
+        state.photoRemoved = false;
+      } catch (error) {
+        state.error = error.message;
+        render();
+        return;
+      }
+      updatePhotoPreview();
     };
   }
-  window.onkeydown = (event) => {
-    const pinScreen = Boolean(root.querySelector('#login-form'));
-    if (!shouldHandlePinKeyboard(event, { unlocked: state.unlocked, gate: state.gate, pinScreen, target: event.target })) return;
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const form = root.querySelector('#login-form');
-      if (form && String(state.lockDigits || '').length >= 4) form.requestSubmit();
-      return;
-    }
-    event.preventDefault();
-    state.lockDigits = applyPinKey(state.lockDigits, event.key);
-    landing();
-  };
-  if (!state.unlocked && root.querySelector('#login-form')) {
-    const active = document.activeElement;
-    const typingUrl = active && (active.name === 'sheetsUrl' || (active.tagName === 'INPUT' && !active.classList.contains('pin-entry') && active.name !== 'shopLock'));
-    if (!typingUrl) {
-      const pin = root.querySelector('input.pin-entry');
-      if (pin) pin.focus({ preventScroll: true });
-    }
+  const amountInput = root.querySelector('form[data-kind="sale"] input[name="amountInr"]');
+  const paidInput = root.querySelector('form[data-kind="sale"] input[name="paidInr"]');
+  if (amountInput && paidInput) {
+    paidInput.addEventListener('input', () => { paidInput.dataset.touched = '1'; });
+    amountInput.addEventListener('input', () => { if (!paidInput.dataset.touched) paidInput.value = amountInput.value; });
   }
   for (const input of root.querySelectorAll('input[data-range]')) {
     input.onchange = () => {
@@ -1355,13 +1821,13 @@ function bind() {
       render();
     };
   }
-  const search = root.querySelector('input.search');
-  if (search) {
+  for (const search of root.querySelectorAll('input.search')) {
     search.oninput = () => {
-      state.search = search.value;
+      const key = search.dataset.scope === 'customer' ? 'customerSearch' : 'search';
+      state[key] = search.value;
       const pos = search.selectionStart;
       render();
-      const next = root.querySelector('input.search');
+      const next = root.querySelector(`input.search[data-scope="${search.dataset.scope || ''}"]`) || root.querySelector('input.search');
       if (next) {
         next.focus();
         try { next.setSelectionRange(pos, pos); } catch { /* ignore */ }
@@ -1370,8 +1836,12 @@ function bind() {
   }
   const metalType = root.querySelector('select[name="metalType"]');
   const purity = root.querySelector('select[name="purity"]');
+  const category = root.querySelector('select[name="category"]');
   if (metalType && purity) {
-    metalType.onchange = () => { purity.innerHTML = purityOptions(metalType.value || 'GOLD', purity.value); };
+    metalType.onchange = () => {
+      purity.innerHTML = purityOptions(metalType.value || 'GOLD', '');
+      if (category) category.innerHTML = categoryOptions(metalType.value || 'GOLD', '');
+    };
   }
   for (const typeSel of root.querySelectorAll('select[name^="metalType_"]')) {
     const i = String(typeSel.name).slice('metalType_'.length);
@@ -1384,6 +1854,7 @@ function bind() {
 async function onDelete(kind) {
   const row = state.editing;
   if (!row) return;
+  const photoIds = [];
   if (kind === 'supplier') {
     if (!confirm(`Delete ${partyLabel(row)} and all of their khata?`)) return;
     markDeleted('suppliers', row.id);
@@ -1402,6 +1873,25 @@ async function onDelete(kind) {
     if (!confirm('Delete this metal entry?')) return;
     markDeleted('metal', row.id);
     state.metal = removeById(state.metal, row.id);
+  } else if (kind === 'customer') {
+    if (!confirm(`Delete ${customerLabel(row)} and all of their sales and returns?`)) return;
+    requireNewScript('customer');
+    photoIds.push(...state.sales.filter((x) => x.customerId === row.id).map((x) => x.photoId));
+    markDeleted('customers', row.id);
+    for (const item of state.sales.filter((x) => x.customerId === row.id)) markDeleted('sales', item.id);
+    Object.assign(state, removeCustomerData(state, row.id));
+    state.view = 'customers';
+    state.customerId = null;
+  } else if (kind === 'sale') {
+    if (!confirm('Delete this sale / return? Its photo is removed too.')) return;
+    requireNewScript('sale');
+    photoIds.push(row.photoId);
+    markDeleted('sales', row.id);
+    state.sales = removeById(state.sales, row.id);
+  } else if (kind === 'category') {
+    if (!confirm(`Remove ${row.category} from the ${row.metalType} item list? Old sales keep their item name.`)) return;
+    markDeleted('categories', row.id);
+    state.categories = removeById(state.categories, row.id);
   } else if (kind === 'metalMaster') {
     if (!confirm(`Delete ${row.metalType} ${row.purity} from master?`)) return;
     markDeleted('metalMaster', row.id);
@@ -1413,7 +1903,9 @@ async function onDelete(kind) {
   }
   state.modal = null;
   state.editing = null;
+  resetPhotoState();
   await persist();
+  if (photoIds.length) trashPhotos(photoIds);
   render();
 }
 
@@ -1455,9 +1947,8 @@ async function submitForm(event) {
         state.sheetsUrl = normalizeAppsScriptUrl(data.sheetsUrl);
         try { localStorage.setItem(URL_KEY, state.sheetsUrl); } catch { /* ignore */ }
       }
-      const typed = String(state.lockDigits || data.shopLock || data.pin || '').trim();
+      const typed = String(data.shopLock || data.pin || '').trim();
       state.pin = typed;
-      state.lockDigits = '';
       forgetLocalPin();
       if (!typed) throw new Error('Enter the shop PIN');
       const verified = await verifyPin((payload) => sheetsRequest(payload));
@@ -1473,6 +1964,10 @@ async function submitForm(event) {
     const kind = form.dataset.kind;
     const isNew = !state.editing;
     const id = state.editing?.id || nid();
+    requireNewScript(kind);
+    const saveBtn = form.querySelector('.form-actions .btn-primary');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    let staleSalePhoto = '';
     if (kind === 'supplier') {
       const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', notes: data.notes || '', status: 'ACTIVE' }, isNew);
       state.suppliers = upsertById(state.suppliers, row);
@@ -1547,6 +2042,53 @@ async function submitForm(event) {
         metalGrams: Number(data.metalGrams || 0), date: data.date, note: data.note || ''
       }, isNew));
       markDirty('settlements', id);
+    } else if (kind === 'customer') {
+      const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', city: data.city || '', notes: data.notes || '', status: 'ACTIVE' }, isNew);
+      state.customers = upsertById(state.customers, row);
+      markDirty('customers', id);
+      if (isNew) {
+        state.view = 'customer';
+        state.customerId = row.id;
+      }
+    } else if (kind === 'sale') {
+      const v = validateSale(data);
+      const old = state.editing || {};
+      let photoId = old.photoId || '';
+      let photoUrl = old.photoUrl || '';
+      if (state.pendingPhoto) {
+        if (saveBtn) saveBtn.textContent = 'Saving photo…';
+        const customer = state.customers.find((c) => c.id === data.customerId);
+        const res = await sheetsRequest({
+          action: 'uploadPhoto',
+          name: photoFileName({ customerName: customer?.name, kind: data.kind, date: data.date }),
+          mime: state.pendingPhoto.mime,
+          data: state.pendingPhoto.base64
+        });
+        if (!res.fileId) throw new Error('Photo was not saved. The Karigar script in your Sheet is out of date — update it and try again.');
+        state.photoCache[res.fileId] = state.pendingPhoto.dataUrl;
+        staleSalePhoto = photoId;
+        photoId = res.fileId;
+        photoUrl = res.url || '';
+      } else if (state.photoRemoved && photoId) {
+        staleSalePhoto = photoId;
+        photoId = '';
+        photoUrl = '';
+      }
+      state.sales = upsertById(state.sales, stamp({
+        ...old, id, customerId: data.customerId, kind: data.kind === RETURN ? RETURN : SALE,
+        category: String(data.category).trim(), metalType: String(data.metalType).toUpperCase(), purity: data.purity,
+        weightGrams: v.grams, amountInr: v.amount, paidInr: v.paid, date: data.date, note: data.note || '',
+        photoId, photoUrl
+      }, isNew));
+      markDirty('sales', id);
+    } else if (kind === 'category') {
+      const metalType = String(data.metalType || '').trim().toUpperCase();
+      const name = String(data.category || '').trim();
+      if (!name) throw new Error('Enter the item name');
+      const dup = state.categories.find((c) => c.id !== id && String(c.metalType).toUpperCase() === metalType && String(c.category).toLowerCase() === name.toLowerCase());
+      if (dup) throw new Error(`${name} is already in the ${metalType} list`);
+      state.categories = upsertById(state.categories, stamp({ ...(state.editing || {}), id, metalType, category: name, status: data.status || 'ACTIVE' }, isNew));
+      markDirty('categories', id);
     } else if (kind === 'metalMaster') {
       const metalType = String(data.metalType || '').trim().toUpperCase();
       const purity = String(data.purity || '').trim();
@@ -1560,14 +2102,29 @@ async function submitForm(event) {
     }
     state.modal = null;
     state.editing = null;
+    resetPhotoState();
     await persist();
+    if (staleSalePhoto) trashPhotos([staleSalePhoto]);
     render();
   } catch (error) {
+    if (form.id === 'data-form' && state.modal) {
+      let box = form.querySelector('.form-error');
+      if (!box) {
+        box = document.createElement('div');
+        box.className = 'notice form-error';
+        box.setAttribute('role', 'alert');
+        form.prepend(box);
+      }
+      box.textContent = explainLedgerError(error);
+      const btn = form.querySelector('.form-actions .btn-primary');
+      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      box.scrollIntoView({ block: 'nearest' });
+      return;
+    }
     state.error = error.message;
     if (form.id === 'login-form' || form.id === 'setup-exec' || form.id === 'setup-shop' || form.id === 'setup-sheet' || form.id === 'setup-license') {
       state.unlocked = false;
       state.pin = '';
-      state.lockDigits = '';
       return landing();
     }
     render();
@@ -1600,7 +2157,8 @@ async function bootstrap() {
   } catch { /* ignore */ }
   state.unlocked = false;
   state.pin = '';
-  state.lockDigits = '';
+  try { state.bigText = localStorage.getItem(TEXT_KEY) === '1'; } catch { /* ignore */ }
+  applyTextSize();
   const session = readSessionUnlock();
   if (session && (!state.sheetsUrl || session.sheetsUrl === state.sheetsUrl)) {
     state.sheetsUrl = session.sheetsUrl;

@@ -34,6 +34,19 @@ Opening `/exec` in Chrome on FluffyPens would 401 too. That is normal.
    Copy the URL that ends with `/exec`. Do not open it.
 6. Open Karigar PWA → Setup → paste that `/exec` URL → Save. Or put it in `apps-script-url.txt` / GitHub secret `APPS_SCRIPT_URL` like FluffyPens.
 
+## Updating an existing shop (customers, categories, photos)
+
+The newest app adds customers, sale/return entries with photos, and metal item types (chain, ring, mangalsutra…). The Sheet side must be updated once, or the app will show a yellow “Update needed” note and will not save customers.
+
+1. Open the shop Sheet → **Extensions → Apps Script**.
+2. Select all, paste the newest [`pwa/google-apps-script.gs`](./pwa/google-apps-script.gs). **Put your own `SCRIPT_PIN`, `LICENSE_KEY` and `LICENSE_URL` back at the top** (they are overwritten by the paste).
+3. Gear → Project Settings → Show `appsscript.json` → paste [`pwa/appsscript.json`](./pwa/appsscript.json). It now also lists `drive.file`, which lets Karigar save photos **only in files it creates itself** (a “Karigar photos” folder in your Drive). It cannot read your other Drive files.
+4. Run **authorizeKarigar** → Allow. Then run **initLedger** (adds the new tabs: `Customers`, `Sales`, `Categories`, `CustomerKhata`).
+5. **Deploy → Manage deployments → pencil → New version → Deploy.** The `/exec` URL stays the same.
+6. In the app tap **Refresh data**.
+
+New tabs: `Customers`, `Sales` (one row per sold / returned item, with a Drive link to the photo), `Categories`, and `CustomerKhata` (balance and metal per customer, readable by your CA).
+
 ## 1. Create the spreadsheet
 
 1. Open [Google Sheets](https://sheets.google.com) while signed in as the shop owner (or you, for the first client).

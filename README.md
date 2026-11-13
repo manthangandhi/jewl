@@ -2,7 +2,7 @@
 
 Karigar is a jewellery supplier ledger for shop owners. The client app is a **PWA** (phone home screen) with the same architecture as [FluffyPens](https://github.com/manthangandhi/fluffy-content-vault): a static frontend, Google Apps Script as the API, and **Google Sheets as the only database**.
 
-Every supplier, money, metal, and settlement row can be created, edited, and deleted. Party balances (we owe them / they owe us / metal with party) live on the home screen and on a `Balances` tab in the Sheet.
+Every supplier, money, metal, and settlement row can be created, edited, and deleted. **Customers** can be added too: record what each customer bought (Sold) or brought back (Returned) by metal, purity and item type (chain, ring, mangalsutra, payal…), with an optional photo saved to the owner's Google Drive. Item types are editable under **Metals**. The app is one responsive layout for phones, tablets and laptops, uses the device's own keyboard for the PIN, and has a Bigger text switch. Party balances (we owe them / they owe us / metal with party) live on the home screen and on a `Balances` tab in the Sheet.
 
 ## First client (Sheets PWA)
 

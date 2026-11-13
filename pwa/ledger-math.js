@@ -1,5 +1,6 @@
 export const GOLD_PURITIES = ['24K', '22K', '18K', '14K'];
 export const SILVER_PURITIES = ['999', '925'];
+export const PLATINUM_PURITIES = ['950', '900'];
 
 export function puritiesForType(master, metalType) {
   const type = String(metalType || '').toUpperCase();
@@ -9,7 +10,9 @@ export function puritiesForType(master, metalType) {
     .map((row) => String(row.purity || '').trim())
     .filter(Boolean);
   if (fromMaster.length) return [...new Set(fromMaster)];
-  return type === 'SILVER' ? SILVER_PURITIES.slice() : GOLD_PURITIES.slice();
+  if (type === 'SILVER') return SILVER_PURITIES.slice();
+  if (type === 'PLATINUM') return PLATINUM_PURITIES.slice();
+  return GOLD_PURITIES.slice();
 }
 
 export function assertPurity(metalType, purity, master) {

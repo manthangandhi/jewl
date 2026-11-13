@@ -1,10 +1,12 @@
-const CACHE_NAME = 'karigar-shell-v21';
+const CACHE_NAME = 'karigar-shell-v23';
 const CORE_ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './party-khata-print.js',
+  './customer-math.js',
+  './photo.js',
   './sheet-model.js',
   './sheets-client.js',
   './shop-auth.js',

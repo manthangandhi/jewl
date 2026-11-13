@@ -12,7 +12,10 @@ export function toLedgerSnapshot(data) {
     money: Array.isArray(data?.money) ? data.money : [],
     metal: Array.isArray(data?.metal) ? data.metal : [],
     settlements: Array.isArray(data?.settlements) ? data.settlements : [],
-    metalMaster: Array.isArray(data?.metalMaster) ? data.metalMaster : []
+    metalMaster: Array.isArray(data?.metalMaster) ? data.metalMaster : [],
+    customers: Array.isArray(data?.customers) ? data.customers : [],
+    sales: Array.isArray(data?.sales) ? data.sales : [],
+    categories: Array.isArray(data?.categories) ? data.categories : []
   };
 }
 

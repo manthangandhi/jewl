@@ -4,6 +4,7 @@
  * 2. Gear → Project Settings → Show "appsscript.json". Scopes:
  *    spreadsheets.currentonly
  *    script.external_request
+ *    drive.file   (customer photos — only files Karigar itself creates)
  * 3. Run authorizeKarigar → Allow (this spreadsheet + Connect to an external service).
  * 4. Run initLedger to create tabs.
  * 5. Deploy → Web app → Execute as Me → Anyone. Copy /exec into the PWA.
@@ -13,7 +14,9 @@
 const SCRIPT_PIN = "PASTE_SHOP_PIN_HERE";
 const LICENSE_KEY = "PASTE_LICENSE_KEY_HERE";
 const LICENSE_URL = "PASTE_LICENSE_URL_HERE";
-const SCRIPT_VERSION = "2026-09-18-karigar-cols2";
+const SCRIPT_VERSION = "2026-11-13-karigar-customers";
+const PHOTO_FOLDER_PROP = "KARIGAR_PHOTO_FOLDER_ID";
+const MAX_PHOTO_BASE64 = 6000000;
 const LOCAL_TIMEZONE = "Asia/Kolkata";
 
 const HEADERS = {
@@ -23,10 +26,14 @@ const HEADERS = {
   Metal: ["date", "supplierName", "direction", "metalType", "purity", "weightGrams", "note", "createdAt", "updatedAt", "supplierId", "id"],
   Settlements: ["date", "supplierName", "moneyAmountInr", "metalType", "purity", "metalGrams", "note", "createdAt", "updatedAt", "supplierId", "id"],
   Khata: ["supplierName", "status", "moneyDirection", "moneyInr", "gold24k", "gold22k", "gold18k", "gold14k", "silver999", "silver925", "weOweInr", "theyOweInr", "updatedAt", "supplierId"],
-  MetalMaster: ["metalType", "purity", "rateInrPerGram", "status", "createdAt", "updatedAt", "id"]
+  MetalMaster: ["metalType", "purity", "rateInrPerGram", "status", "createdAt", "updatedAt", "id"],
+  Customers: ["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id"],
+  Sales: ["date", "customerName", "kind", "category", "metalType", "purity", "weightGrams", "amountInr", "paidInr", "note", "photoId", "photoUrl", "createdAt", "updatedAt", "customerId", "id"],
+  Categories: ["metalType", "category", "status", "createdAt", "updatedAt", "id"],
+  CustomerKhata: ["customerName", "phone", "balanceDirection", "balanceInr", "metalSummary", "lastActivity", "updatedAt", "customerId"]
 };
 
-const TAB_ORDER = ["Khata", "Suppliers", "Money", "Metal", "Settlements", "MetalMaster", "_Meta"];
+const TAB_ORDER = ["Khata", "CustomerKhata", "Suppliers", "Customers", "Money", "Metal", "Settlements", "Sales", "MetalMaster", "Categories", "_Meta"];
 
 function spreadsheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -38,6 +45,7 @@ function spreadsheet_() {
 
 function authorizeKarigar() {
   spreadsheet_();
+  photoFolder_();
   const url = String(LICENSE_URL || "").trim();
   try {
     if (url && url.indexOf("PASTE_") !== 0) {
@@ -134,6 +142,9 @@ function doPost(e) {
     if (body.action === "init") return jsonOut_(initLedger());
     if (body.action === "load") return jsonOut_(loadLedger_());
     if (body.action === "save") return jsonOut_(saveLedger_(body));
+    if (body.action === "uploadPhoto") return jsonOut_(uploadPhoto_(body));
+    if (body.action === "getPhoto") return jsonOut_(getPhoto_(body));
+    if (body.action === "deletePhoto") return jsonOut_(deletePhoto_(body));
     if (body.action === "seedDemo") return jsonOut_(seedDemoLedger_({ force: Boolean(body.force), replace: body.replace !== false }));
     if (body.action === "clearDemo") return jsonOut_(clearDemoLedger_());
     return jsonOut_(loadLedger_());
@@ -348,7 +359,11 @@ function loadLedger_() {
     money: readRowsAsObjects_("Money"),
     metal: readRowsAsObjects_("Metal"),
     settlements: readRowsAsObjects_("Settlements"),
-    metalMaster: readRowsAsObjects_("MetalMaster")
+    metalMaster: readRowsAsObjects_("MetalMaster"),
+    customers: readRowsAsObjects_("Customers"),
+    sales: readRowsAsObjects_("Sales"),
+    categories: readRowsAsObjects_("Categories"),
+    features: ["customers", "photos", "categories"]
   };
 }
 
@@ -359,6 +374,11 @@ function saveLedger_(body) {
   writeObjectsAsRows_("Metal", Array.isArray(body.metal) ? body.metal : []);
   writeObjectsAsRows_("Settlements", Array.isArray(body.settlements) ? body.settlements : []);
   writeObjectsAsRows_("MetalMaster", Array.isArray(body.metalMaster) ? body.metalMaster : []);
+  // Older apps do not send these lists; never wipe a tab the caller did not mention.
+  if (Array.isArray(body.customers)) writeObjectsAsRows_("Customers", body.customers);
+  if (Array.isArray(body.sales)) writeObjectsAsRows_("Sales", body.sales);
+  if (Array.isArray(body.categories)) writeObjectsAsRows_("Categories", body.categories);
+  if (Array.isArray(body.customerKhata)) writeObjectsAsRows_("CustomerKhata", body.customerKhata);
   writeObjectsAsRows_("Khata", Array.isArray(body.khata) ? body.khata : (Array.isArray(body.balances) ? body.balances : []));
   hideLegacyBalances_();
   return { ok: true, version: SCRIPT_VERSION, spreadsheetUrl: spreadsheetUrl_(), lastSavedAt: formatDateTime_(new Date()) };
@@ -578,4 +598,53 @@ function formatDateTime_(date) {
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+/* ---------- Customer photos (Google Drive, files created by Karigar only) ---------- */
+
+function photoFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const saved = props.getProperty(PHOTO_FOLDER_PROP);
+  if (saved) {
+    try {
+      const folder = DriveApp.getFolderById(saved);
+      if (!folder.isTrashed()) return folder;
+    } catch (err) { /* recreate below */ }
+  }
+  const folder = DriveApp.createFolder("Karigar photos — " + spreadsheet_().getName());
+  props.setProperty(PHOTO_FOLDER_PROP, folder.getId());
+  return folder;
+}
+
+function uploadPhoto_(body) {
+  const data = String((body && body.data) || "");
+  if (!data) throw new Error("No photo received");
+  if (data.length > MAX_PHOTO_BASE64) throw new Error("Photo is too large. Take it again at a lower size.");
+  const mime = /^image\/(jpeg|png|webp)$/.test(String(body.mime || "")) ? String(body.mime) : "image/jpeg";
+  const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+  const base = String(body.name || "photo-" + Date.now()).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80);
+  const blob = Utilities.newBlob(Utilities.base64Decode(data), mime, base + "." + ext);
+  const file = photoFolder_().createFile(blob);
+  return { ok: true, version: SCRIPT_VERSION, fileId: file.getId(), url: file.getUrl() };
+}
+
+function getPhoto_(body) {
+  const id = String((body && body.fileId) || "").trim();
+  if (!id) throw new Error("No photo id");
+  const file = DriveApp.getFileById(id);
+  if (file.isTrashed()) throw new Error("This photo was deleted from Drive");
+  const blob = file.getBlob();
+  return { ok: true, version: SCRIPT_VERSION, dataUrl: "data:" + blob.getContentType() + ";base64," + Utilities.base64Encode(blob.getBytes()) };
+}
+
+function deletePhoto_(body) {
+  const id = String((body && body.fileId) || "").trim();
+  if (!id) return { ok: true, deleted: false };
+  try {
+    DriveApp.getFileById(id).setTrashed(true);
+    return { ok: true, deleted: true };
+  } catch (err) {
+    return { ok: true, deleted: false };
+  }
 }

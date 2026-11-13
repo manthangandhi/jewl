@@ -85,6 +85,9 @@ export function explainLedgerError(raw) {
   if (/openById|specified permissions are not sufficient|not sufficient for this operation/i.test(msg)) {
     return 'Paste Code.gs from the jewellery Sheet: Extensions → Apps Script (bound to this spreadsheet). Do not use a standalone script or SpreadsheetApp.openById. Gear → Project Settings → Show appsscript.json → scopes must be spreadsheets.currentonly and script.external_request. Run authorizeKarigar → Allow → Deploy New version.';
   }
+  if (/DriveApp|auth\/drive|Drive\.|photo folder/i.test(msg)) {
+    return 'Photos need one more permission. In the shop Apps Script: paste the new Code.gs, run authorizeKarigar → Allow (Google Drive files created by Karigar), then Deploy → Manage deployments → New version.';
+  }
   if (/wrong shop pin/i.test(msg)) {
     return 'Wrong shop PIN. It must match SCRIPT_PIN in the deployed Code.gs. After you change the PIN, Deploy → Manage deployments → New version.';
   }

@@ -7,7 +7,7 @@ import { HEADERS } from '../pwa/sheet-model.js';
 const pwa = path.join(process.cwd(), 'pwa');
 
 test('PWA shell files exist for installable Sheets app', () => {
-  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'App.html', 'appsscript.json']) {
+  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'customer-math.js', 'photo.js', 'App.html', 'appsscript.json']) {
     assert.equal(fs.existsSync(path.join(pwa, file)), true, file);
   }
   const html = fs.readFileSync(path.join(pwa, 'index.html'), 'utf8');
@@ -72,10 +72,10 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(js, /New shop/);
   assert.match(js, /copy-script|Copy script/);
   assert.match(js, /admitUnlock/);
-  assert.match(js, /pin-pad/);
   assert.match(js, /shopLock/);
-  assert.match(js, /applyPinKey/);
-  assert.match(js, /shouldHandlePinKeyboard/);
+  assert.doesNotMatch(js, /pin-pad|applyPinKey|shouldHandlePinKeyboard|lockDigits/);
+  assert.match(js, /name="shopLock" class="pin-entry" type="password" inputmode="numeric"/);
+  assert.doesNotMatch(js, /pinEntry\.oninput/);
   assert.match(js, /desk-col/);
   assert.match(js, /assertPartyName/);
   assert.match(js, /data-action="seed-demo"/);
@@ -105,10 +105,50 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(css, /shop-nav/);
   assert.match(css, /min-width: 768px/);
   assert.match(css, /min-width: 1024px/);
-  assert.match(css, /pin-pad/);
+  assert.doesNotMatch(css, /pin-pad/);
   assert.match(css, /desk-col/);
-  assert.match(css, /--radius:\s*0/);
-  assert.match(css, /desk-split\.fill[\s\S]{0,180}grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+  assert.match(css, /prefers-color-scheme:\s*dark/);
+  assert.match(css, /env\(safe-area-inset-bottom\)/);
+  assert.match(css, /min-height:\s*52px/);
   assert.match(css, /\.pin-entry[\s\S]{0,400}letter-spacing/);
   assert.doesNotMatch(css, /\.pin-label\s*\{[^}]*clip:\s*rect/);
+});
+
+test('customers, sales, categories and photos are wired through the app', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /data-view="customers"/);
+  assert.match(js, /data-modal="sale"/);
+  assert.match(js, /data-modal="return"/);
+  assert.match(js, /id="photo-camera"[^>]*capture="environment"/);
+  assert.match(js, /action:\s*'uploadPhoto'/);
+  assert.match(js, /action:\s*'getPhoto'/);
+  assert.match(js, /compressImage/);
+  assert.match(js, /data-modal="category"/);
+  assert.match(js, /customers:\s*state\.customers/);
+  assert.match(js, /sales:\s*state\.sales/);
+  assert.match(js, /categories:\s*state\.categories/);
+});
+
+test('Apps Script stores customers, sales, categories and photos in Drive', () => {
+  const gs = fs.readFileSync(path.join(pwa, 'google-apps-script.gs'), 'utf8');
+  for (const tab of ['Customers', 'Sales', 'Categories', 'CustomerKhata']) assert.match(gs, new RegExp(`${tab}:`));
+  for (const col of HEADERS.Sales) assert.match(gs, new RegExp(`"${col}"`));
+  assert.match(gs, /action === "uploadPhoto"/);
+  assert.match(gs, /action === "getPhoto"/);
+  assert.match(gs, /action === "deletePhoto"/);
+  assert.match(gs, /DriveApp\.createFolder/);
+  assert.match(gs, /Array\.isArray\(body\.customers\)/);
+  const manifest = fs.readFileSync(path.join(pwa, 'appsscript.json'), 'utf8');
+  assert.match(manifest, /auth\/drive\.file/);
+  assert.doesNotMatch(manifest, /auth\/drive"/);
+  assert.equal(fs.readFileSync(path.join(pwa, 'google-apps-script.gs'), 'utf8'), fs.readFileSync(path.join(process.cwd(), 'google-apps-script.gs'), 'utf8'));
+});
+
+test('existing shops get a guided one-time Sheet update with PIN and license filled in', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /data-modal="updateSheet"/);
+  assert.match(js, /copy-update-script/);
+  assert.match(js, /copy-update-manifest/);
+  assert.match(js, /fillScriptConstants\(await res\.text\(\), \{ pin: state\.pin, licenseKey: key/);
+  assert.match(js, /scriptOutdated/);
 });

@@ -31,7 +31,7 @@ test('records land in the column whose header matches the field, not in array or
 });
 
 test('sheet tabs include a CA-readable Khata report with ids last', () => {
-  assert.deepEqual(Object.keys(HEADERS), ['_Meta', 'Suppliers', 'Money', 'Metal', 'Settlements', 'Khata', 'MetalMaster']);
+  assert.deepEqual(Object.keys(HEADERS), ['_Meta', 'Suppliers', 'Money', 'Metal', 'Settlements', 'Khata', 'MetalMaster', 'Customers', 'Sales', 'Categories', 'CustomerKhata']);
   assert.ok(HEADERS.Money.includes('supplierName'));
   assert.equal(HEADERS.Money[0], 'date');
   assert.equal(HEADERS.Money.at(-1), 'id');

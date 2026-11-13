@@ -1,12 +1,12 @@
 {
   "name": "Karigar",
   "short_name": "Karigar",
-  "description": "Jewellery party khata. Your Google Sheet is the book.",
+  "description": "Jewellery khata for suppliers and customers. Your Google Sheet is the book.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#12100c",
-  "theme_color": "#12100c",
+  "background_color": "#17352c",
+  "theme_color": "#17352c",
   "icons": [
     {
       "src": "./icon.svg",

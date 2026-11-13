@@ -1,4 +1,7 @@
 import { summarizeLedger } from './ledger-math.js';
+import { seedCategories, buildCustomerBalanceRows } from './customer-math.js';
+
+export { seedCategories };
 
 export const SCHEMA_VERSION = '1';
 
@@ -9,7 +12,11 @@ export const HEADERS = {
   Metal: ['date', 'supplierName', 'direction', 'metalType', 'purity', 'weightGrams', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'],
   Settlements: ['date', 'supplierName', 'moneyAmountInr', 'metalType', 'purity', 'metalGrams', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'],
   Khata: ['supplierName', 'status', 'moneyDirection', 'moneyInr', 'gold24k', 'gold22k', 'gold18k', 'gold14k', 'silver999', 'silver925', 'weOweInr', 'theyOweInr', 'updatedAt', 'supplierId'],
-  MetalMaster: ['metalType', 'purity', 'rateInrPerGram', 'status', 'createdAt', 'updatedAt', 'id']
+  MetalMaster: ['metalType', 'purity', 'rateInrPerGram', 'status', 'createdAt', 'updatedAt', 'id'],
+  Customers: ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id'],
+  Sales: ['date', 'customerName', 'kind', 'category', 'metalType', 'purity', 'weightGrams', 'amountInr', 'paidInr', 'note', 'photoId', 'photoUrl', 'createdAt', 'updatedAt', 'customerId', 'id'],
+  Categories: ['metalType', 'category', 'status', 'createdAt', 'updatedAt', 'id'],
+  CustomerKhata: ['customerName', 'phone', 'balanceDirection', 'balanceInr', 'metalSummary', 'lastActivity', 'updatedAt', 'customerId']
 };
 
 /** Place each field under the sheet column whose header matches the key — never by array index. */
@@ -38,7 +45,8 @@ export function seedMetalMaster(rows) {
   const now = new Date().toISOString();
   const defaults = [
     ['GOLD', '24K'], ['GOLD', '22K'], ['GOLD', '18K'], ['GOLD', '14K'],
-    ['SILVER', '999'], ['SILVER', '925']
+    ['SILVER', '999'], ['SILVER', '925'],
+    ['PLATINUM', '950']
   ];
   return defaults.map(([metalType, purity]) => ({
     id: `mm-${metalType.toLowerCase()}-${purity.toLowerCase()}`,
@@ -58,7 +66,10 @@ export function emptyLedger() {
     money: [],
     metal: [],
     settlements: [],
-    metalMaster: seedMetalMaster([])
+    metalMaster: seedMetalMaster([]),
+    customers: [],
+    sales: [],
+    categories: seedCategories([])
   };
 }
 
@@ -274,6 +285,14 @@ export function withSupplierNames(rows, suppliers) {
   }));
 }
 
+export function withCustomerNames(rows, customers) {
+  const names = Object.fromEntries((customers || []).map((c) => [c.id, partyDisplayName(c)]));
+  return (rows || []).map((row) => ({
+    ...row,
+    customerName: names[row.customerId] || humanName(row.customerName) || ''
+  }));
+}
+
 export function deleteSupplierCascade(ledger, supplierId) {
   const id = String(supplierId || '');
   return {
@@ -346,6 +365,7 @@ export function buildBalancesRows(ledger, now = new Date()) {
 
 export function prepareSavePayload(ledger, now = new Date()) {
   const suppliers = ledger.suppliers || [];
+  const customers = ledger.customers || [];
   return {
     meta: {
       shopName: ledger.meta?.shopName || '',
@@ -358,6 +378,10 @@ export function prepareSavePayload(ledger, now = new Date()) {
     metal: withSupplierNames(ledger.metal || [], suppliers),
     settlements: withSupplierNames(ledger.settlements || [], suppliers),
     khata: buildBalancesRows(ledger, now),
-    metalMaster: seedMetalMaster(ledger.metalMaster || [])
+    metalMaster: seedMetalMaster(ledger.metalMaster || []),
+    customers,
+    sales: withCustomerNames(ledger.sales || [], customers),
+    categories: seedCategories(ledger.categories || [], now),
+    customerKhata: buildCustomerBalanceRows(customers, ledger.sales || [], now)
   };
 }
