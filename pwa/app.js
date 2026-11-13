@@ -1,8 +1,14 @@
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
-  SALE, RETURN, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
-  categoryTotals, salesPeriodTotals, validateSale, removeCustomerData
+  SALE, RETURN, PAYMENT, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
+  categoryTotals, salesPeriodTotals, validateSale, validatePayment, removeCustomerData
 } from './customer-math.js';
+import { LABEL, balanceName } from './labels.js';
+import {
+  NOTE_KINDS, CUSTOMER_TAGS, SUPPLIER_TAGS, telLink, whatsappLink, mailLink, duesReminderText,
+  dueFollowUps, upcomingDates, notesFor, whenLabel, daysUntil
+} from './crm.js';
+import { fetchLiveRates, effectiveRate, suggestedAmount, ratesAreStale, describeAge } from './rates.js';
 import { compressImage, photoFileName } from './photo.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
@@ -21,23 +27,25 @@ const SESSION_UNLOCK_KEY = 'karigar.sessionUnlock';
 const TOUR_KEY = 'karigar.tourDone';
 const TEXT_KEY = 'karigar.bigText';
 const LICENSE_KEY_STORE = 'karigar.licenseKey';
+const RATES_KEY = 'karigar.liveRates';
+const PREMIUM_KEY = 'karigar.ratePremium';
 const TOUR = [
-  { title: 'One card per supplier', body: 'A supplier is one karigar or supplier. Do not add another card for their phone number, or a separate card for gold vs silver. Cash and every metal sit on the same khata.' },
-  { title: 'Hume dena / Unse lena', body: 'Hume dena = we owe them rupees. Unse lena = they owe us. Metal with the supplier shows as tags such as Gold 22K and Silver 999.' },
-  { title: 'Purchase and payment', body: 'On Purchase you can save rupees, metal, or both together. “Gave metal” is metal you issued. “Got metal” is metal that came back. Add more metal lines for gold and silver in the same bill.' },
-  { title: 'Give / Get metal', body: 'Use these when you only move metal, with no rupee amount. Repeat for any metal and any supplier.' },
-  { title: 'Customers', body: 'Open Customers to add the people who buy from you. On a customer, tap Sold when they buy and Returned when they bring something back. Pick the item (chain, ring, mangalsutra…), metal, weight and amount. You can take a photo of the item too.' },
+  { title: 'Today', body: 'Today shows live gold and silver rates, who to follow up with, birthdays and anniversaries coming up, and the biggest dues.' },
+  { title: 'One card per person', body: 'Each supplier and each customer has one card with their phone, notes and follow-up date. Cash and every metal sit on the same card.' },
+  { title: 'Hume dena and Hume lena', body: 'Hume dena means we have to give. Hume lena means we have to get. It is the same on every supplier and customer.' },
+  { title: 'Suppliers', body: 'Purchase is what you bought. Payment is what you paid. Metal given and Metal received move metal with no rupees. Settlement closes the account.' },
+  { title: 'Customers', body: 'Sale is what they bought. Return is what they gave back. Payment is money they paid you later. You can take a photo of the item on a sale or return.' },
   { title: 'Refresh data', body: 'Tap Refresh data to reload the Google Sheet. Browser refresh will PIN-check this tab. Lock signs you out.' }
 ];
 const root = document.querySelector('#app');
-const emptyTrack = () => ({ suppliers: [], money: [], metal: [], settlements: [], metalMaster: [], customers: [], sales: [], categories: [] });
+const emptyTrack = () => ({ suppliers: [], money: [], metal: [], settlements: [], metalMaster: [], customers: [], sales: [], categories: [], interactions: [] });
 const state = {
   ...emptyLedger(),
   sheetsUrl: '',
   pin: '',
   spreadsheetUrl: '',
   shopName: '',
-  view: 'parties',
+  view: 'today',
   supplierId: null,
   summary: null,
   modal: null,
@@ -60,6 +68,11 @@ const state = {
   dealMetalCount: 1,
   tourStep: null,
   customerId: null,
+  customerFilter: 'all',
+  rates: null,
+  ratesLoading: false,
+  ratesError: '',
+  premiumPct: 0,
   customerSearch: '',
   custSummary: null,
   customerDetail: null,
@@ -94,6 +107,13 @@ const initials = (name) => {
 };
 function ic(name) {
   const paths = {
+    rupee: '<path d="M7 5h10M7 9h10M7 5c5 0 7 2 7 4s-2 4-7 4l7 6"/>',
+    out: '<path d="M5 19L19 5M9 5h10v10"/>',
+    in: '<path d="M19 5L5 19M15 19H5V9"/>',
+    bell: '<path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15z"/><path d="M10 21h4"/>',
+    phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 7l9 6 9-6"/>',
     gem: '<path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9 4l-1 5 4 11M15 4l1 5-4 11"/>',
     sold: '<path d="M6 8h12l1 12H5z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
     returned: '<path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/>',
@@ -117,9 +137,9 @@ function ic(name) {
 }
 
 function moneyDirection(payable) {
-  if (Number(payable) > 0) return { label: 'Hume dena', hindi: 'We owe them', amount: Number(payable), tone: 'owe' };
-  if (Number(payable) < 0) return { label: 'Unse lena', hindi: 'They owe us', amount: -Number(payable), tone: 'collect' };
-  return { label: 'Square', hindi: 'Settled', amount: 0, tone: 'square' };
+  if (Number(payable) > 0) return { label: LABEL.weGive, amount: Number(payable), tone: 'owe' };
+  if (Number(payable) < 0) return { label: LABEL.weGet, amount: -Number(payable), tone: 'collect' };
+  return { label: LABEL.square, amount: 0, tone: 'square' };
 }
 
 function metalTypeOptions(selected) {
@@ -231,7 +251,8 @@ function applyLoaded(data) {
     metalMaster: seedMetalMaster(Array.isArray(data.metalMaster) ? data.metalMaster : []),
     customers: Array.isArray(data.customers) ? data.customers : [],
     sales: Array.isArray(data.sales) ? data.sales : [],
-    categories: seedCategories(Array.isArray(data.categories) ? data.categories : [])
+    categories: seedCategories(Array.isArray(data.categories) ? data.categories : []),
+    interactions: Array.isArray(data.interactions) ? data.interactions : []
   };
   const cleaned = dedupePartyLedger(incoming);
   const before = (incoming.suppliers || []).map((s) => `${s.id}|${s.name}|${s.phone}`).join(';');
@@ -247,6 +268,7 @@ function applyLoaded(data) {
   state.customers = incoming.customers;
   state.sales = incoming.sales;
   state.categories = incoming.categories;
+  state.interactions = incoming.interactions;
   state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl || '';
   state.lastSavedAt = data.lastSavedAt || data.meta?.lastSavedAt || state.lastSavedAt;
   state.unlocked = true;
@@ -379,9 +401,10 @@ async function refreshFromSheet() {
       metalMaster: mergeJournals(remote.metalMaster || [], state.metalMaster, { deletedIds: state.deleted.metalMaster, dirtyIds: state.dirty.metalMaster }),
       customers: mergeJournals(remote.customers || [], state.customers, { deletedIds: state.deleted.customers, dirtyIds: state.dirty.customers }),
       sales: mergeJournals(remote.sales || [], state.sales, { deletedIds: state.deleted.sales, dirtyIds: state.dirty.sales }),
-      categories: mergeJournals(remote.categories || [], state.categories, { deletedIds: state.deleted.categories, dirtyIds: state.dirty.categories })
+      categories: mergeJournals(remote.categories || [], state.categories, { deletedIds: state.deleted.categories, dirtyIds: state.dirty.categories }),
+      interactions: mergeJournals(remote.interactions || [], state.interactions, { deletedIds: state.deleted.interactions, dirtyIds: state.dirty.interactions })
     };
-    const outdated = !Array.isArray(remote.customers);
+    const outdated = !Array.isArray(remote.interactions);
     applyLoaded(merged);
     state.scriptOutdated = outdated;
     writeCache();
@@ -465,7 +488,8 @@ async function persist() {
       metalMaster: state.metalMaster,
       customers: state.customers,
       sales: state.sales,
-      categories: state.categories
+      categories: state.categories,
+      interactions: state.interactions
     });
     const data = await sheetsRequest({ action: 'save', ...payload });
     state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl;
@@ -696,12 +720,100 @@ function loginScreen() {
   `);
 }
 
+function effRate(metalType, purity) {
+  return effectiveRate({ master: state.metalMaster, snapshot: state.rates, premiumPct: state.premiumPct }, metalType, purity);
+}
+
+/** The rows shown for rates: every active metal and purity the shop uses, with a rate where one is known. */
+function rateRows() {
+  const rank = (t) => ({ GOLD: 0, SILVER: 1, PLATINUM: 2 }[String(t).toUpperCase()] ?? 3);
+  return (state.metalMaster || [])
+    .filter((row) => String(row.status || 'ACTIVE') !== 'INACTIVE')
+    .map((row) => ({ row, ...effRate(row.metalType, row.purity) }))
+    .sort((a, b) => rank(a.row.metalType) - rank(b.row.metalType) || String(b.row.purity).localeCompare(String(a.row.purity), 'en', { numeric: true }));
+}
+
 function rateBoard() {
-  const rows = (state.metalMaster || []).filter((row) => String(row.status || 'ACTIVE') !== 'INACTIVE' && Number(row.rateInrPerGram) > 0);
+  const rows = rateRows().filter((r) => r.perGram > 0);
   if (!rows.length) return '';
-  return `<div class="rate-board" aria-label="Board rates">${rows.map((row) => (
-    `<div class="rate-chip" data-metal="${esc(row.metalType)}"><em>${esc(titleCase(row.metalType))} ${esc(row.purity)}</em><strong>${money(Number(row.rateInrPerGram))}/g</strong></div>`
+  return `<div class="rate-board" aria-label="Rates per gram">${rows.map((r) => (
+    `<div class="rate-chip" data-metal="${esc(r.row.metalType)}"><em>${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</em><strong>${money(r.perGram)}/g</strong></div>`
   )).join('')}</div>`;
+}
+
+function ratesCard() {
+  const rows = rateRows();
+  const age = state.rates ? describeAge(state.rates.fetchedAt) : '';
+  const status = state.ratesLoading ? 'Updating…' : state.ratesError ? state.ratesError : age ? `Live, updated ${age}` : '';
+  return `<section class="list-card rates-card" id="rates-card">
+    <div class="list-head"><span>Today’s rates</span><button type="button" class="btn-plain" data-action="refresh-rates" ${state.ratesLoading ? 'disabled' : ''}>${ic('refresh')}<span>Refresh rates</span></button></div>
+    ${status ? `<p class="rates-status ${state.ratesError ? 'bad' : ''}" role="status">${esc(status)}</p>` : ''}
+    ${rows.length ? `<ul class="rate-list">${rows.map((r) => `<li data-metal="${esc(r.row.metalType)}">
+      <span class="rate-name">${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</span>
+      <span class="rate-src">${r.source === 'board' ? 'Your board rate' : r.source === 'live' ? 'Live' : ''}</span>
+      <strong>${r.perGram ? `${money(r.perGram)}<small>per gram</small>` : 'No rate yet'}</strong>
+    </li>`).join('')}</ul>` : '<p class="lede">Add a metal under Metals to see its rate here.</p>'}
+    <form class="premium-row" id="premium-form">
+      <label>Add to the international price (percent)
+        <input name="premium" type="number" step="0.1" inputmode="decimal" value="${esc(state.premiumPct || '')}" placeholder="0">
+      </label>
+      <p class="hint">Live rates are the international price turned into rupees. Indian board rates usually run a few percent higher because of duty and tax. Add that difference here, or type your own board rate on the Metals page, which always wins.</p>
+    </form>
+  </section>`;
+}
+
+function refreshRateDom() {
+  const board = root.querySelector('.rate-board');
+  const html = rateBoard();
+  if (board && html) board.outerHTML = html;
+  else if (board && !html) board.remove();
+  else if (!board && html) { const stage = root.querySelector('.stage'); if (stage) stage.insertAdjacentHTML('beforebegin', html); }
+  const card = root.querySelector('#rates-card');
+  if (card) card.outerHTML = ratesCard();
+  const bar = root.querySelector('.appbar-end .btn-refresh');
+  if (bar) bar.disabled = state.syncing;
+  updateRateSuggest();
+}
+
+function loadSavedRates() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RATES_KEY) || 'null');
+    if (saved && saved.usdInr > 0 && saved.gold > 0) state.rates = saved;
+    state.premiumPct = Number(localStorage.getItem(PREMIUM_KEY) || 0) || 0;
+  } catch { /* ignore */ }
+}
+
+async function loadRates(force = false) {
+  if (state.ratesLoading) return;
+  if (!force && state.rates && !ratesAreStale(state.rates.fetchedAt)) return;
+  if (!force && Date.now() - (state.ratesTriedAt || 0) < 60000) return;
+  state.ratesTriedAt = Date.now();
+  state.ratesLoading = true;
+  state.ratesError = '';
+  if (state.unlocked) refreshRateDom();
+  try {
+    state.rates = await fetchLiveRates(fetch);
+    try { localStorage.setItem(RATES_KEY, JSON.stringify(state.rates)); } catch { /* ignore */ }
+  } catch {
+    state.ratesError = state.rates ? 'Could not refresh. Showing the last rates.' : 'Could not load live rates. Check your internet.';
+  } finally {
+    state.ratesLoading = false;
+    if (state.unlocked) refreshRateDom();
+  }
+}
+
+/** Under the weight field of a sale: what that weight comes to at today's rate, one tap to use it. */
+function updateRateSuggest() {
+  const form = root.querySelector('form[data-kind="sale"]');
+  const box = root.querySelector('#rate-suggest');
+  if (!form || !box || !form.elements.metalType) return;
+  const { perGram, source } = effRate(form.elements.metalType.value, form.elements.purity.value);
+  const amount = suggestedAmount(form.elements.weightGrams.value, perGram);
+  if (!perGram) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = amount
+    ? `At ${source === 'board' ? 'your board rate' : 'today’s live rate'} of ${money(perGram)} a gram, this comes to <b>${money(amount)}</b>. <button type="button" class="btn-plain" data-action="use-suggest" data-amount="${amount}">Use this amount</button>`
+    : `${source === 'board' ? 'Your board rate' : 'Today’s live rate'}: ${money(perGram)} a gram.`;
 }
 
 function metalMasterGroups(rows) {
@@ -725,38 +837,40 @@ function metalMasterGroups(rows) {
 
 function recordActions() {
   if (!state.suppliers.length) return '';
-  return `<div class="voucher-bar" role="group" aria-label="Khata actions">
-    <div class="voucher-col gave">
-      <p class="voucher-kicker">You gave</p>
-      <button type="button" data-action="modal" data-modal="purchase">Purchase</button>
-      <button type="button" data-action="modal" data-modal="issue">Give metal</button>
-    </div>
-    <div class="voucher-col got">
-      <p class="voucher-kicker">You got</p>
-      <button type="button" data-action="modal" data-modal="payment">Payment</button>
-      <button type="button" data-action="modal" data-modal="receive">Get metal</button>
-    </div>
+  const S = LABEL.supplier;
+  return `<div class="action-bar four" role="group" aria-label="Supplier entries">
+    <button type="button" class="act primary" data-action="modal" data-modal="purchase">${ic('sold')}<span><strong>${S.purchase}</strong><small>We bought</small></span></button>
+    <button type="button" class="act" data-action="modal" data-modal="payment">${ic('rupee')}<span><strong>${S.payment}</strong><small>We paid</small></span></button>
+    <button type="button" class="act" data-action="modal" data-modal="issue">${ic('out')}<span><strong>${S.metalGiven}</strong><small>We gave metal</small></span></button>
+    <button type="button" class="act" data-action="modal" data-modal="receive">${ic('in')}<span><strong>${S.metalReceived}</strong><small>We got metal</small></span></button>
   </div>`;
 }
 
 function customerRows() {
   const q = state.customerSearch.trim().toLowerCase();
-  const rows = state.custSummary?.byCustomer || [];
+  const t = today();
+  let rows = state.custSummary?.byCustomer || [];
+  const byId = Object.fromEntries(state.customers.map((c) => [c.id, c]));
+  if (state.customerFilter === 'owe') rows = rows.filter((row) => row.balance > 0);
+  if (state.customerFilter === 'vip') rows = rows.filter((row) => byId[row.id]?.tag === 'VIP');
+  if (state.customerFilter === 'follow') rows = rows.filter((row) => { const d = daysUntil(byId[row.id]?.followUpDate, t); return d !== null && d <= 3; });
   if (!q) return rows;
   return rows.filter((row) => row.name.toLowerCase().includes(q) || String(row.phone || '').toLowerCase().includes(q));
 }
 
 function customerTone(balance) {
-  if (balance > 0) return { label: 'Unse lena', hint: 'Customer owes us', amount: balance, tone: 'collect' };
-  if (balance < 0) return { label: 'Hume dena', hint: 'We owe customer', amount: -balance, tone: 'owe' };
-  return { label: 'Square', hint: 'Settled', amount: 0, tone: 'square' };
+  if (balance > 0) return { label: LABEL.weGet, amount: balance, tone: 'collect' };
+  if (balance < 0) return { label: LABEL.weGive, amount: -balance, tone: 'owe' };
+  return { label: LABEL.square, amount: 0, tone: 'square' };
 }
 
 function saleActions() {
   if (!state.customers.length) return '';
-  return `<div class="sale-bar" role="group" aria-label="Customer actions">
-    <button type="button" class="sale-btn sold" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>Sold</strong><small>They bought</small></span></button>
-    <button type="button" class="sale-btn returned" data-action="modal" data-modal="return">${ic('returned')}<span><strong>Returned</strong><small>They gave back</small></span></button>
+  const C = LABEL.customer;
+  return `<div class="action-bar three" role="group" aria-label="Customer entries">
+    <button type="button" class="act primary" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>${C.sale}</strong><small>They bought</small></span></button>
+    <button type="button" class="act return" data-action="modal" data-modal="return">${ic('returned')}<span><strong>${C.return}</strong><small>They gave back</small></span></button>
+    <button type="button" class="act" data-action="modal" data-modal="custpay">${ic('rupee')}<span><strong>${C.payment}</strong><small>They paid us</small></span></button>
   </div>`;
 }
 
@@ -787,33 +901,36 @@ function customersHome() {
     </section>` : `<div class="empty-khata grow">
       <span class="empty-gem">${ic('gem')}</span>
       <p class="empty-title">${state.customers.length ? 'No match' : 'No customers yet'}</p>
-      <p class="lede">${state.customers.length ? 'Try another name or number.' : 'Add the people who buy from you. Then tap Sold or Returned on them.'}</p>
+      <p class="lede">${state.customers.length ? 'Try another name or number.' : 'Add the people who buy from you. Then tap Sale, Return or Payment on them.'}</p>
       ${state.customers.length ? '' : '<button class="btn btn-primary" data-action="modal" data-modal="customer">Add customer</button>'}
     </div>`;
   return `
     <div class="desk-split fill">
       <div class="desk-col">
         <section class="balance-hero">
-          <div class="bh collect"><span>Unse lena</span><strong>${money(s.customersOweInr || 0)}</strong></div>
-          <div class="bh owe"><span>Hume dena</span><strong>${money(s.weOweCustomersInr || 0)}</strong></div>
+          <div class="bh collect"><span>${LABEL.weGet}</span><strong>${money(s.customersOweInr || 0)}</strong></div>
+          <div class="bh owe"><span>${LABEL.weGive}</span><strong>${money(s.weOweCustomersInr || 0)}</strong></div>
         </section>
         ${saleActions()}
         <div class="filter-row">
           <div class="search-bar">${ic('search')}<input class="search" data-scope="customer" name="search" value="${esc(state.customerSearch)}" placeholder="Search customers" aria-label="Search customers"></div>
+          <div class="chips">
+            ${[['all', 'All'], ['owe', LABEL.weGet], ['vip', 'VIP'], ['follow', 'Follow-up']].map(([id, label]) => `<button type="button" class="chip ${state.customerFilter === id ? 'on' : ''}" data-action="customer-filter" data-filter="${id}">${label}</button>`).join('')}
+          </div>
         </div>
         ${list}
       </div>
       <aside class="side-panel">
         <div class="list-head"><span>This month</span><button type="button" class="btn-plain" data-view="report">Report</button></div>
         <div class="mini-stats">
-          <div><span>Sold</span><strong>${money(month.soldInr)}</strong></div>
-          <div><span>Returned</span><strong>${money(month.returnedInr)}</strong></div>
+          <div><span>Sales</span><strong>${money(month.soldInr)}</strong></div>
+          <div><span>Returns</span><strong>${money(month.returnedInr)}</strong></div>
           <div><span>Gold/silver sold</span><strong>${grams(month.soldGrams)}</strong></div>
           <div><span>Taken back</span><strong>${grams(month.returnedGrams)}</strong></div>
         </div>
         <ol class="passbook-list tight">${recent.map((row) => `
           <li class="cell clickable" data-edit="sale" data-id="${esc(row.id)}">
-            <span class="cell-main"><strong>${row.kind === RETURN ? 'Returned' : 'Sold'}, ${esc(row.category || '')}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))}, ${fmtDate(row.date)}</small></span>
+            <span class="cell-main"><strong>${row.kind === PAYMENT ? LABEL.customer.payment : (row.kind === RETURN ? LABEL.customer.return : LABEL.customer.sale)}${row.category ? `, ${esc(row.category)}` : ''}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))}, ${fmtDate(row.date)}</small></span>
             <span class="cell-trail"><b>${money(row.amountInr)}</b></span>
           </li>`).join('') || '<li class="empty-in">No sales this month</li>'}</ol>
       </aside>
@@ -846,20 +963,21 @@ function customerPassbook() {
       <div class="bh"><span>Bought (net metal)</span><div>${metalPills(detail.metalNet) || '<strong>—</strong>'}</div></div>
     </section>
     ${saleActions()}
+    ${crmPanel('customer', detail.customer, detail.balance)}
     <section class="list-card blotter grow">
-      <div class="list-head"><span>Sold and returned</span><span>${lines.length}</span></div>
+      <div class="list-head"><span>Sales, returns and payments</span><span>${lines.length}</span></div>
       ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
         <li class="cell clickable" data-edit="sale" data-id="${esc(line.id)}">
           <time class="pass-date">${esc(fmtDate(line.date))}</time>
           <span class="cell-main">
             <strong>${line.label}${line.hasPhoto ? ` <span class="photo-flag" title="Has photo">${ic('camera')}</span>` : ''}</strong>
-            <small>${esc(line.detail)}${line.note ? `, ${esc(line.note)}` : ''}</small>
+            <small>${esc([line.detail, line.note].filter(Boolean).join(', '))}</small>
           </span>
           <span class="cell-trail">
             <b class="${line.kind === 'return' ? 'owe' : 'collect'}">${money(line.amountInr)}</b>
             <em class="hisab"><span>Paid ${money(line.paidInr)}</span><span>Balance ${money(line.runningInr)}</span></em>
           </span>
-        </li>`).join('')}</ol>` : '<div class="empty-in">No sales yet. Tap Sold when this customer buys.</div>'}
+        </li>`).join('')}</ol>` : '<div class="empty-in">Nothing yet. Tap Sale when this customer buys.</div>'}
     </section>
     </div>`;
 }
@@ -871,18 +989,133 @@ function customerSalesCard(range) {
   return `<section class="list-card">
     <div class="list-head"><span>Customer sales by item</span><span>${totals.count}</span></div>
     <div class="mini-stats cat-stats">
-      <div><span>Sold</span><strong>${money(totals.soldInr)}</strong></div>
-      <div><span>Returned</span><strong>${money(totals.returnedInr)}</strong></div>
+      <div><span>Sales</span><strong>${money(totals.soldInr)}</strong></div>
+      <div><span>Returns</span><strong>${money(totals.returnedInr)}</strong></div>
       <div><span>Weight sold</span><strong>${grams(totals.soldGrams)}</strong></div>
       <div><span>Weight returned</span><strong>${grams(totals.returnedGrams)}</strong></div>
     </div>
+    ${cats.length ? `<ol class="barchart" aria-label="Net weight by item, in grams">${(() => {
+      const max = Math.max(...cats.map((r) => Math.abs(r.netGrams)), 1);
+      return cats.filter((r) => r.netGrams > 0).slice(0, 8).map((r) => `<li title="${esc(r.category)}: ${grams(r.netGrams)} net">
+        <span>${esc(r.category)} <small>${esc(titleCase(r.metalType))}</small></span>
+        <span class="bar-track"><i class="bar" style="--w:${Math.max(2, Math.round((r.netGrams / max) * 100))}%"></i></span>
+        <b>${grams(r.netGrams)}</b></li>`).join('');
+    })()}</ol>` : ''}
     <div class="data-table cat-table">
-      <div class="th"><span>Item</span><span>Sold</span><span>Returned</span><span>Net</span></div>
+      <div class="th"><span>Item</span><span>Sales</span><span>Returns</span><span>Net</span></div>
       ${cats.map((row) => `<div class="tr">
         <span>${esc(row.category)} <small>${esc(titleCase(row.metalType))}</small></span><span>${grams(row.soldGrams)}</span><span>${grams(row.returnedGrams)}</span><span>${grams(row.netGrams)}</span>
       </div>`).join('')}
     </div>
   </section>`;
+}
+
+const contactParty = (kind, id) => (kind === 'customer' ? state.customers : state.suppliers).find((p) => p.id === id);
+
+function factRow(label, value) {
+  return value ? `<div><dt>${label}</dt><dd>${value}</dd></div>` : '';
+}
+
+/** Contact buttons, details, follow-up and notes for one supplier or customer. */
+function crmPanel(kind, party, owesUs = 0) {
+  const phone = party.phone || '';
+  const call = telLink(phone);
+  const wa = whatsappLink(phone);
+  const mail = mailLink(party.email);
+  const remind = kind === 'customer' && owesUs > 0 && whatsappLink(phone, duesReminderText({ shopName: state.shopName, name: party.name, amountInr: owesUs }));
+  const buttons = [
+    call ? `<a class="btn btn-soft" href="${esc(call)}">${ic('phone')}<span>Call</span></a>` : '',
+    wa ? `<a class="btn btn-soft" href="${esc(wa)}" target="_blank" rel="noopener">${ic('chat')}<span>WhatsApp</span></a>` : '',
+    mail ? `<a class="btn btn-soft" href="${esc(mail)}">${ic('mail')}<span>Email</span></a>` : '',
+    remind ? `<a class="btn btn-soft" href="${esc(remind)}" target="_blank" rel="noopener">${ic('bell')}<span>Remind about dues</span></a>` : ''
+  ].filter(Boolean).join('');
+  const facts = [
+    factRow('Type', party.tag ? esc(party.tag) : ''),
+    factRow('City', party.city ? esc(party.city) : ''),
+    factRow('Address', party.address ? esc(party.address) : ''),
+    factRow('Email', party.email ? esc(party.email) : ''),
+    kind === 'supplier' ? factRow('GSTIN', party.gstin ? esc(party.gstin) : '') : '',
+    kind === 'customer' ? factRow('Birthday', party.birthday ? esc(fmtLong(party.birthday)) : '') : '',
+    kind === 'customer' ? factRow('Anniversary', party.anniversary ? esc(fmtLong(party.anniversary)) : '') : '',
+    factRow('Notes', party.notes ? esc(party.notes) : '')
+  ].join('');
+  const days = daysUntil(party.followUpDate, today());
+  const follow = party.followUpDate ? `<div class="followup ${days !== null && days < 0 ? 'late' : ''}">
+      <span class="followup-icon">${ic('bell')}</span>
+      <span class="followup-text"><strong>${esc(whenLabel(days))}${party.followUpNote ? `: ${esc(party.followUpNote)}` : ''}</strong><small>Follow-up on ${esc(fmtLong(party.followUpDate))}</small></span>
+      <button type="button" class="btn btn-soft" data-action="followup-done" data-kind="${kind}" data-id="${esc(party.id)}">Done</button>
+    </div>` : '';
+  const notes = notesFor(state.interactions, party.id);
+  return `<section class="crm" aria-label="Contact and notes">
+    ${buttons ? `<div class="contact-row">${buttons}</div>` : ''}
+    ${follow}
+    ${facts ? `<dl class="facts">${facts}</dl>` : ''}
+    <section class="list-card notes">
+      <div class="list-head"><span>Notes and calls</span><button type="button" class="btn-plain" data-action="add-note" data-kind="${kind}" data-id="${esc(party.id)}">+ Add note</button></div>
+      ${notes.length ? `<ol class="note-list">${notes.map((n) => `<li class="cell clickable" data-edit="interaction" data-id="${esc(n.id)}">
+        <time class="pass-date">${esc(fmtDate(n.date))}</time>
+        <span class="cell-main"><strong>${esc(n.kind || 'Note')}</strong><small>${esc(n.text || '')}</small></span>
+      </li>`).join('')}</ol>` : '<div class="empty-in">No notes yet. Write down what was said, so you remember next time.</div>'}
+    </section>
+  </section>`;
+}
+
+function fmtLong(v) {
+  const d = new Date(String(v).slice(0, 10) + 'T00:00:00');
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+const wishText = (c, label) => `${label === 'Birthday' ? `Happy birthday ${c.name}! Wishing you a wonderful year ahead.` : `Happy anniversary ${c.name}! Wishing you many more happy years together.`} From all of us at ${state.shopName || 'our shop'}.`;
+
+function todayView() {
+  const t = today();
+  const everyone = [
+    ...state.customers.map((c) => ({ ...c, _kind: 'customer' })),
+    ...state.suppliers.map((c) => ({ ...c, _kind: 'supplier' }))
+  ];
+  const follow = dueFollowUps(everyone, t, 3);
+  const dates = upcomingDates(state.customers, t, 7);
+  const collect = (state.custSummary?.byCustomer || []).filter((r) => r.balance > 0).sort((a, b) => b.balance - a.balance).slice(0, 5);
+  const pay = (state.summary?.bySupplier || []).filter((r) => r.payable > 0).sort((a, b) => b.payable - a.payable).slice(0, 5);
+  const link = (kind, id) => (kind === 'customer' ? `data-customer="${esc(id)}"` : `data-supplier="${esc(id)}"`);
+  const empty = (text) => `<div class="empty-in">${text}</div>`;
+  return `
+    <div class="today">
+      <div class="today-rates">${ratesCard()}</div>
+      <section class="list-card">
+        <div class="list-head"><span>Follow-ups</span><span>${follow.length}</span></div>
+        ${follow.length ? `<ul class="plain-list">${follow.map(({ party, days }) => `<li><button type="button" class="cell" ${link(party._kind, party.id)}>
+          ${avatar(party.name)}
+          <span class="cell-main"><strong>${esc(party.name)}</strong><small>${esc(party.followUpNote || (party._kind === 'customer' ? 'Customer' : 'Supplier'))}</small></span>
+          <span class="cell-trail ${days < 0 ? 'owe' : ''}"><b>${esc(whenLabel(days))}</b></span>
+        </button></li>`).join('')}</ul>` : empty('Nobody to follow up with. Add a follow-up date on a customer or supplier.')}
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span>Birthdays and anniversaries</span><span>${dates.length}</span></div>
+        ${dates.length ? `<ul class="plain-list">${dates.map((d) => {
+    const wa = whatsappLink(d.customer.phone, wishText(d.customer, d.label));
+    return `<li class="cell">
+          <button type="button" class="cell-hit" data-customer="${esc(d.customer.id)}">
+            ${avatar(d.customer.name)}
+            <span class="cell-main"><strong>${esc(d.customer.name)}</strong><small>${d.label}, ${esc(whenLabel(d.days).toLowerCase())}</small></span>
+          </button>
+          ${wa ? `<a class="btn btn-soft" href="${esc(wa)}" target="_blank" rel="noopener">${ic('chat')}<span>Wish</span></a>` : ''}
+        </li>`;
+  }).join('')}</ul>` : empty('No birthdays or anniversaries in the next 7 days.')}
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span>${LABEL.weGet}, customers</span><span>${money((state.custSummary?.customersOweInr) || 0)}</span></div>
+        ${collect.length ? `<ul class="plain-list">${collect.map((r) => `<li><button type="button" class="cell" data-customer="${esc(r.id)}">
+          ${avatar(r.name)}<span class="cell-main"><strong>${esc(r.name)}</strong><small>${r.lastDate ? `Last entry ${esc(fmtDate(r.lastDate))}` : ''}</small></span>
+          <span class="cell-trail collect"><b>${money(r.balance)}</b></span></button></li>`).join('')}</ul>` : empty('No customer owes you anything.')}
+      </section>
+      <section class="list-card">
+        <div class="list-head"><span>${LABEL.weGive}, suppliers</span><span>${money((state.summary?.weOweInr) || 0)}</span></div>
+        ${pay.length ? `<ul class="plain-list">${pay.map((r) => `<li><button type="button" class="cell" data-supplier="${esc(r.id)}">
+          ${avatar(r.name)}<span class="cell-main"><strong>${esc(r.name)}</strong></span>
+          <span class="cell-trail owe"><b>${money(r.payable)}</b></span></button></li>`).join('')}</ul>` : empty('You do not owe any supplier.')}
+      </section>
+    </div>`;
 }
 
 function partiesHome() {
@@ -920,14 +1153,14 @@ function partiesHome() {
       <div class="desk-col">
         <section class="balance-hero">
           <div class="bh owe"><span>Hume dena</span><strong>${money(s.weOweInr || 0)}</strong></div>
-          <div class="bh collect"><span>Unse lena</span><strong>${money(s.theyOweInr || 0)}</strong></div>
+          <div class="bh collect"><span>${LABEL.weGet}</span><strong>${money(s.theyOweInr || 0)}</strong></div>
         </section>
         <div class="filter-row">
           <div class="search-bar">${ic('search')}<input class="search" name="search" value="${esc(state.search)}" placeholder="Search suppliers" aria-label="Search suppliers"></div>
           <div class="chips">
             <button type="button" class="chip ${state.partyFilter === 'all' ? 'on' : ''}" data-action="party-filter" data-filter="all">All</button>
-            <button type="button" class="chip ${state.partyFilter === 'owe' ? 'on' : ''}" data-action="party-filter" data-filter="owe">Hume dena</button>
-            <button type="button" class="chip ${state.partyFilter === 'collect' ? 'on' : ''}" data-action="party-filter" data-filter="collect">Unse lena</button>
+            <button type="button" class="chip ${state.partyFilter === 'owe' ? 'on' : ''}" data-action="party-filter" data-filter="owe">${LABEL.weGive}</button>
+            <button type="button" class="chip ${state.partyFilter === 'collect' ? 'on' : ''}" data-action="party-filter" data-filter="collect">${LABEL.weGet}</button>
           </div>
         </div>
         ${list}
@@ -937,8 +1170,8 @@ function partiesHome() {
         <div class="mini-stats">
           <div><span>Purchases</span><strong>${money(month.purchases)}</strong></div>
           <div><span>Payments</span><strong>${money(month.payments)}</strong></div>
-          <div><span>Metal out</span><strong>${grams(month.metalOut)}</strong></div>
-          <div><span>Metal in</span><strong>${grams(month.metalIn)}</strong></div>
+          <div><span>Metal given</span><strong>${grams(month.metalOut)}</strong></div>
+          <div><span>Metal received</span><strong>${grams(month.metalIn)}</strong></div>
         </div>
         <ol class="passbook-list tight">${month.lines.slice(0, 8).map((line) => `
           <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
@@ -978,6 +1211,7 @@ function supplierPassbook() {
     </section>
     ${recordActions()}
     <button class="text-link" data-action="modal" data-modal="settle" type="button">Settle account</button>
+    ${crmPanel('supplier', detail.supplier)}
     <section class="list-card blotter grow">
       <div class="list-head"><span>Running hisab</span></div>
       ${lines.length ? `<ol class="passbook-list">${lines.map((line) => `
@@ -1019,12 +1253,12 @@ function reportView() {
             <div class="mini-stats">
               <div><span>Purchases</span><strong>${money(row.purchases)}</strong></div>
               <div><span>Payments</span><strong>${money(row.payments)}</strong></div>
-              <div><span>Metal out</span><strong>${grams(row.metalOut)}</strong></div>
-              <div><span>Metal in</span><strong>${grams(row.metalIn)}</strong></div>
+              <div><span>Metal given</span><strong>${grams(row.metalOut)}</strong></div>
+              <div><span>Metal received</span><strong>${grams(row.metalIn)}</strong></div>
             </div>
           </button>`).join('')}</div>
         <div class="data-table report-party-table">
-          <div class="th"><span>Supplier</span><span>Purchases</span><span>Payments</span><span>Metal out</span><span>Metal in</span></div>
+          <div class="th"><span>Supplier</span><span>Purchases</span><span>Payments</span><span>Metal given</span><span>Metal received</span></div>
           ${report.byParty.map((row) => `<button type="button" class="tr" data-supplier="${esc(row.id)}">
             <span>${esc(row.name)}</span><span>${money(row.purchases)}</span><span>${money(row.payments)}</span><span>${grams(row.metalOut)}</span><span>${grams(row.metalIn)}</span>
           </button>`).join('')}
@@ -1051,8 +1285,8 @@ function reportView() {
     <section class="metric-grid">
       <div class="metric"><span>Purchases</span><strong>${money(report.purchases)}</strong></div>
       <div class="metric"><span>Payments</span><strong>${money(report.payments)}</strong></div>
-      <div class="metric"><span>Metal out</span><strong>${grams(report.metalOut)}</strong></div>
-      <div class="metric"><span>Metal in</span><strong>${grams(report.metalIn)}</strong></div>
+      <div class="metric"><span>Metal given</span><strong>${grams(report.metalOut)}</strong></div>
+      <div class="metric"><span>Metal received</span><strong>${grams(report.metalIn)}</strong></div>
       <div class="metric"><span>Settled</span><strong>${money(report.settled)}</strong></div>
       <div class="metric"><span>Entries</span><strong>${report.count}</strong></div>
     </section>
@@ -1071,69 +1305,21 @@ function reportView() {
 }
 
 function helpView() {
+  const item = (title, lead, body) => `<article class="help-item"><h2>${title}</h2><p class="help-lead">${lead}</p><p>${body}</p></article>`;
   return `<section class="help-page list-card grow">
     <div class="list-head"><span>How this works</span><button type="button" class="btn-plain" data-action="tour-start">Start tour</button></div>
     <div class="help-body">
-      <article class="help-item">
-        <h2>Customers</h2>
-        <p class="help-lead">People who buy from you.</p>
-        <p>Open Customers, add a name, then tap <strong>Sold</strong> when they buy and <strong>Returned</strong> when they bring something back. Pick the metal, the item (chain, ring, mangalsutra…), weight and rupees. Unse lena = the customer still owes you.</p>
-      </article>
-      <article class="help-item">
-        <h2>Photos</h2>
-        <p class="help-lead">Take a photo of the item.</p>
-        <p>On a sale or return, tap <strong>Take photo</strong> (phone camera) or <strong>Choose photo</strong>. The picture is saved in your own Google Drive, in a Karigar photos folder. Tap the entry later to see it again.</p>
-      </article>
-      <article class="help-item">
-        <h2>Suppliers</h2>
-        <p class="help-lead">One name, one khata.</p>
-        <p>Phone is optional and quiet. Gold, silver, and cash sit on the same card — never a second card for a metal or a mobile number.</p>
-      </article>
-      <article class="help-item">
-        <h2>Hume dena / Unse lena</h2>
-        <p class="help-lead">Hume dena = we owe them. Unse lena = they owe us.</p>
-        <p>Rupees only. Metal with the supplier is separate, stamped GOLD 22K / SILVER 999.</p>
-      </article>
-      <article class="help-item">
-        <h2>Purchase</h2>
-        <p class="help-lead">Bill from supplier: rupees, metal, or both.</p>
-        <p>Leave rupees blank for metal-only. Add extra metal lines for gold and silver on the same bill. Gave metal = you issued. Got metal = it came back.</p>
-      </article>
-      <article class="help-item">
-        <h2>Payment</h2>
-        <p class="help-lead">You paid them.</p>
-        <p>Rupees, and optional metal that moved with that payment.</p>
-      </article>
-      <article class="help-item">
-        <h2>Give metal / Get metal</h2>
-        <p class="help-lead">Metal only — no rupee amount.</p>
-        <p>Issue for jobwork, or receive it back. Same supplier, any metal, as many times as needed.</p>
-      </article>
-      <article class="help-item">
-        <h2>Settle</h2>
-        <p class="help-lead">Square the running hisab.</p>
-        <p>Close cash and/or metal against the khata.</p>
-      </article>
-      <article class="help-item">
-        <h2>Print / Share PDF</h2>
-        <p class="help-lead">Send one supplier’s khata, not the whole shop.</p>
-        <p>Open the supplier. Print for paper or Save as PDF. Share PDF sends the same hisab on WhatsApp when the phone allows file share.</p>
-      </article>
-      <article class="help-item">
-        <h2>Refresh data</h2>
-        <p class="help-lead">Header Refresh pulls the Sheet. You stay unlocked.</p>
-        <p>The browser refresh button will ask for PIN again on this tab.</p>
-      </article>
-      <article class="help-item">
-        <h2>Metals and categories</h2>
-        <p class="help-lead">Purities, item types, and optional board rate.</p>
-        <p>These appear on Purchase and Give / Get metal. If you enter ₹ per gram, GOLD 22K etc. show under the header like the shop rate board. Empty rates stay off the header — they are not a second khata.</p>
-      </article>
-      <article class="help-item">
-        <h2>Demo khata</h2>
-        <p class="help-lead">Sheet screen only — not for live books.</p>
-        <p>Load demo writes sample suppliers and customers into the Google Sheet, not into the app. A live shop stays empty until you add real ones.</p>
-      </article>
+      ${item('Today', 'Your day at a glance.', 'Live gold, silver and platinum rates, who to follow up with, birthdays and anniversaries in the next week, and the biggest amounts to get and to give.')}
+      ${item('Live rates', 'International price, in rupees.', 'Rates come from the world market and are turned into rupees per gram for each purity. Indian board rates usually run a few percent higher, so add the difference on the Today page, or type your own board rate on the Metals page, which always wins. On a sale, the weight is priced at today’s rate and you can tap to use it.')}
+      ${item('Hume dena and Hume lena', 'The same two words everywhere.', 'Hume dena means we have to give. Hume lena means we have to get. They mean the same on every supplier and every customer.')}
+      ${item('Suppliers', 'Karigars and wholesalers. One card each.', 'Purchase is what you bought. Payment is what you paid. Metal given and Metal received move metal with no rupees. Settlement closes the account. Gold, silver and cash sit on the same card.')}
+      ${item('Customers', 'People who buy from you. One card each.', 'Sale is what they bought. Return is what they gave back. Payment is money they paid you later. Pick the metal, the item (chain, ring, mangalsutra) and the weight. A sale or return can carry a photo.')}
+      ${item('Contacts and follow-ups', 'Remember every person.', 'Each card has Call, WhatsApp and Email buttons, a follow-up date, notes of what was said, and for customers a birthday and anniversary. Remind about dues opens WhatsApp with the message ready to send. Nothing is sent until you press send.')}
+      ${item('Photos', 'Take a photo of the item.', 'On a sale or return, tap Take photo or Choose photo. The picture is saved in your own Google Drive, in a Karigar photos folder. Tap the entry later to see it.')}
+      ${item('Print and share', 'One supplier’s khata, not the whole shop.', 'Open a supplier. Print for paper or Save as PDF. Share PDF sends the same account on WhatsApp when your phone allows it.')}
+      ${item('Metals and categories', 'Purities, item types and an optional board rate.', 'These appear on every purchase and sale. If you type a rate in rupees per gram it replaces the live rate for that metal.')}
+      ${item('Refresh data', 'Reloads the Google Sheet.', 'You stay unlocked. The browser refresh button asks for the PIN again. Lock signs you out.')}
+      ${item('Demo khata', 'Sheet screen only, not for live books.', 'Load demo writes sample suppliers, customers, sales and notes into the Google Sheet. Remove demo deletes only those.')}
     </div>
   </section>`;
 }
@@ -1208,6 +1394,7 @@ function viewContent() {
   if (state.view === 'supplier') return supplierPassbook();
   if (state.view === 'customer') return customerPassbook();
   if (state.view === 'customers') return customersHome();
+  if (state.view === 'today') return todayView();
   if (state.view === 'report') return reportView();
   if (state.view === 'today') return reportView();
   if (state.view === 'masters') return mastersView();
@@ -1220,7 +1407,7 @@ function render() {
   if (!state.unlocked) return landing();
   const on = (...views) => (views.includes(state.view) ? 'active' : '');
   const outdated = state.scriptOutdated
-    ? `<div class="notice warn"><strong>One-time update needed for customers and photos.</strong> Until then customers are not saved. <button type="button" class="btn btn-primary banner-btn" data-action="modal" data-modal="updateSheet">Show me how — step by step</button></div>`
+    ? `<div class="notice warn"><strong>One-time update needed for customers, notes and photos.</strong> Until then people and entries are not saved. <button type="button" class="btn btn-primary banner-btn" data-action="modal" data-modal="updateSheet">Show me how — step by step</button></div>`
     : '';
   // Only a change of page eases in; typing in a search box must not make the list flash.
   const enter = state.lastView !== state.view + ':' + (state.supplierId || state.customerId || '');
@@ -1229,9 +1416,10 @@ function render() {
     <header class="appbar">
       <div class="brand"><span class="brand-mark">${ic('gem')}</span> <span>${esc(state.shopName || 'Karigar')}</span></div>
       <nav class="shop-nav" aria-label="Shop">
+        <button class="nav-item nav-core ${on('today')}" data-view="today" type="button" ${on('today') ? 'aria-current="page"' : ''}>${ic('today')}<span>Today</span></button>
         <button class="nav-item nav-core ${on('customers', 'customer')}" data-view="customers" type="button" ${on('customers', 'customer') ? 'aria-current="page"' : ''}>${ic('customers')}<span>Customers</span></button>
         <button class="nav-item nav-core ${on('parties', 'supplier')}" data-view="parties" type="button" ${on('parties', 'supplier') ? 'aria-current="page"' : ''}>${ic('parties')}<span>Suppliers</span></button>
-        <button class="nav-item nav-core ${on('report', 'today')}" data-view="report" type="button" ${on('report', 'today') ? 'aria-current="page"' : ''}>${ic('today')}<span>Report</span></button>
+        <button class="nav-item nav-core ${on('report')}" data-view="report" type="button" ${on('report') ? 'aria-current="page"' : ''}>${ic('report')}<span>Report</span></button>
         <button class="nav-item ${on('masters')}" data-view="masters" type="button" ${on('masters') ? 'aria-current="page"' : ''}>${ic('masters')}<span>Metals</span></button>
         <button class="nav-item nav-core ${on('books')}" data-view="books" type="button" ${on('books') ? 'aria-current="page"' : ''}>${ic('sheet')}<span>Sheet</span></button>
         <button class="nav-item ${on('help')}" data-view="help" type="button" ${on('help') ? 'aria-current="page"' : ''}>${ic('help')}<span>How to</span></button>
@@ -1260,6 +1448,29 @@ function render() {
   bind();
 }
 
+function tagOptions(list, selected) {
+  return `<option value="">None</option>${list.map((t) => `<option value="${esc(t)}" ${t === selected ? 'selected' : ''}>${esc(t)}</option>`).join('')}`;
+}
+
+function moreDetails(kind, e) {
+  const filled = ['email', 'address', 'gstin', 'birthday', 'anniversary', 'tag', 'followUpDate', 'followUpNote'].some((k) => e[k]);
+  return `<details class="more" ${filled ? 'open' : ''}>
+    <summary>More details (optional)</summary>
+    <label>${kind === 'customer' ? 'Customer type' : 'Supplier type'}<select name="tag">${tagOptions(kind === 'customer' ? CUSTOMER_TAGS : SUPPLIER_TAGS, e.tag || '')}</select></label>
+    <label>Email<input name="email" type="email" inputmode="email" autocomplete="off" value="${esc(e.email || '')}"></label>
+    <label>Address<input name="address" autocomplete="off" value="${esc(e.address || '')}"></label>
+    ${kind === 'supplier' ? `<label>GSTIN<input name="gstin" autocomplete="off" value="${esc(e.gstin || '')}"></label>` : `
+    <div class="field-row">
+      <label>Birthday<input name="birthday" type="date" value="${esc(String(e.birthday || '').slice(0, 10))}"></label>
+      <label>Anniversary<input name="anniversary" type="date" value="${esc(String(e.anniversary || '').slice(0, 10))}"></label>
+    </div>`}
+    <div class="field-row">
+      <label>Follow up on<input name="followUpDate" type="date" value="${esc(String(e.followUpDate || '').slice(0, 10))}"></label>
+      <label>Follow-up note<input name="followUpNote" autocomplete="off" value="${esc(e.followUpNote || '')}" placeholder="Why call?"></label>
+    </div>
+  </details>`;
+}
+
 function supplierModal() {
   const e = state.editing || {};
   return `<div class="modal-backdrop"><section class="modal">
@@ -1268,8 +1479,9 @@ function supplierModal() {
       <label>Supplier name<input name="name" required value="${esc(e.name || '')}" placeholder="Karigar or supplier"></label>
       <label>Phone (optional)<input name="phone" value="${esc(e.phone || '')}"></label>
       <label>Notes (optional)<input name="notes" value="${esc(e.notes || '')}"></label>
+      ${moreDetails('supplier', e)}
       ${e.id ? '' : `
-        <label>Opening — hume dena (₹)<input name="openingMoney" type="number" min="0" step="0.01" value="0"></label>
+        <label>Opening balance, ${LABEL.weGive} (₹)<input name="openingMoney" type="number" min="0" step="0.01" value="0"></label>
         <label>Opening metal<select name="metalType"><option value="">None</option>${metalTypeOptions('')}</select></label>
         <label>Purity<select name="purity">${purityOptions('GOLD', '22K')}</select></label>
         <label>Opening metal (grams)<input name="weightGrams" type="number" min="0" step="0.001" value="0"></label>
@@ -1290,8 +1502,8 @@ function metalLineHtml(i, draft = {}) {
   return `<div class="metal-line" data-metal-row="${i}">
       <label>Gave / got
         <select name="metalDir_${i}">
-          <option value="ISSUE" ${dir === 'ISSUE' ? 'selected' : ''}>Gave metal</option>
-          <option value="RECEIPT" ${dir === 'RECEIPT' ? 'selected' : ''}>Got metal</option>
+          <option value="ISSUE" ${dir === 'ISSUE' ? 'selected' : ''}>Metal given</option>
+          <option value="RECEIPT" ${dir === 'RECEIPT' ? 'selected' : ''}>Metal received</option>
         </select>
       </label>
       <label>Metal<select name="metalType_${i}">${metalTypeOptions(type)}</select></label>
@@ -1358,13 +1570,13 @@ function metalModal(direction) {
   const isEdit = Boolean(e.id);
   const current = e.direction || direction;
   return `<div class="modal-backdrop"><section class="modal">
-    <div class="section-head"><h2>${isEdit ? 'Edit metal' : (current === 'RECEIPT' ? 'Get metal' : 'Give metal')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <div class="section-head"><h2>${isEdit ? 'Edit metal entry' : (current === 'RECEIPT' ? LABEL.supplier.metalReceived : LABEL.supplier.metalGiven)}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
     <form id="data-form" data-kind="metal">
       ${locked ? `<input type="hidden" name="supplierId" value="${esc(state.supplierId)}">` : `<label>Supplier<select name="supplierId" required>${state.suppliers.map((s) => `<option value="${esc(s.id)}" ${s.id === (e.supplierId || state.supplierId) ? 'selected' : ''}>${esc(partyLabel(s))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Direction<select name="direction">
         <option value="OPENING" ${e.direction === 'OPENING' ? 'selected' : ''}>Opening</option>
-        <option value="ISSUE" ${current === 'ISSUE' ? 'selected' : ''}>Give metal</option>
-        <option value="RECEIPT" ${current === 'RECEIPT' ? 'selected' : ''}>Get metal</option>
+        <option value="ISSUE" ${current === 'ISSUE' ? 'selected' : ''}>Metal given</option>
+        <option value="RECEIPT" ${current === 'RECEIPT' ? 'selected' : ''}>Metal received</option>
       </select></label>` : `<input type="hidden" name="direction" value="${esc(current)}">`}
       <label>Metal<select name="metalType">${metalTypeOptions(e.metalType || 'GOLD')}</select></label>
       <label>Purity<select name="purity">${purityOptions(e.metalType || 'GOLD', e.purity || '22K')}</select></label>
@@ -1412,6 +1624,7 @@ function customerModal() {
       <label>Phone (optional)<input name="phone" type="tel" inputmode="tel" autocomplete="off" value="${esc(e.phone || '')}"></label>
       <label>City / area (optional)<input name="city" autocomplete="off" value="${esc(e.city || '')}"></label>
       <label>Notes (optional)<input name="notes" autocomplete="off" value="${esc(e.notes || '')}"></label>
+      ${moreDetails('customer', e)}
       <div class="form-actions">
         ${e.id ? '<button type="button" class="btn btn-soft" data-delete="customer">Delete customer</button>' : ''}
         <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
@@ -1474,13 +1687,13 @@ function saleModal(modalKind) {
   const amountDefault = e.amountInr ?? '';
   const paidDefault = isEdit ? (e.paidInr ?? '') : '';
   const customerId = e.customerId || state.customerId || '';
-  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${isReturn ? 'Customer returned' : 'Customer bought'}">
-    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isReturn ? 'Customer returned' : 'Customer bought')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${isReturn ? 'Customer return' : 'Customer sale'}">
+    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isReturn ? 'Return from customer' : 'Sale to customer')}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
     <form id="data-form" data-kind="sale">
       ${locked ? `<input type="hidden" name="customerId" value="${esc(state.customerId)}">` : `<label>Customer<select name="customerId" required><option value="">Choose customer…</option>${state.customers.map((c) => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(customerLabel(c))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Type<select name="kind">
-        <option value="SALE" ${!isReturn ? 'selected' : ''}>Sold</option>
-        <option value="RETURN" ${isReturn ? 'selected' : ''}>Returned</option>
+        <option value="SALE" ${!isReturn ? 'selected' : ''}>Sale</option>
+        <option value="RETURN" ${isReturn ? 'selected' : ''}>Return</option>
       </select></label>` : `<input type="hidden" name="kind" value="${kind}">`}
       <div class="field-row">
         <label>Metal<select name="metalType">${metalTypeOptions(metalType)}</select></label>
@@ -1488,6 +1701,7 @@ function saleModal(modalKind) {
       </div>
       <label>Item<select name="category" required>${categoryOptions(metalType, e.category || '')}</select></label>
       <label>Weight (grams)<input name="weightGrams" type="number" min="0.001" step="0.001" required inputmode="decimal" placeholder="e.g. 12.5" value="${esc(e.weightGrams || '')}"></label>
+      <p class="rate-suggest" id="rate-suggest" hidden></p>
       <label>${isReturn ? 'Value of returned item (₹)' : 'Bill amount (₹)'}<input name="amountInr" type="number" min="0" step="0.01" required inputmode="decimal" placeholder="e.g. 85000" value="${esc(amountDefault)}"></label>
       <label>${isReturn ? 'Refunded to customer (₹)' : 'Received from customer (₹)'}<input name="paidInr" type="number" min="0" step="0.01" inputmode="decimal" data-touched="${isEdit ? '1' : ''}" placeholder="Same as bill if paid in full" value="${esc(paidDefault)}"></label>
       <div class="photo-box">
@@ -1556,6 +1770,50 @@ function updateSheetModal() {
   </section></div>`;
 }
 
+function interactionModal() {
+  const e = state.editing || {};
+  const party = contactParty(e.partyType === 'SUPPLIER' ? 'supplier' : 'customer', e.partyId) || {};
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${e.id ? 'Edit note' : 'Add note'}">
+    <div class="section-head"><h2>${e.id ? 'Edit note' : 'Add note'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <p class="lede">${esc(party.name || '')}</p>
+    <form id="data-form" data-kind="interaction">
+      <input type="hidden" name="partyId" value="${esc(e.partyId || '')}">
+      <input type="hidden" name="partyType" value="${esc(e.partyType || '')}">
+      <label>What happened<select name="kind">${NOTE_KINDS.map((k) => `<option value="${k}" ${k === (e.kind || 'Note') ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+      <label>Note<textarea name="text" rows="4" required placeholder="What was said or agreed">${esc(e.text || '')}</textarea></label>
+      <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
+      <div class="form-actions">
+        ${e.id ? '<button type="button" class="btn btn-soft" data-delete="interaction">Delete</button>' : ''}
+        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </section></div>`;
+}
+
+function custPayModal() {
+  const e = state.editing || {};
+  const isEdit = Boolean(e.id);
+  const locked = Boolean(state.customerId) && !isEdit;
+  const customerId = e.customerId || state.customerId || '';
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Payment from customer">
+    <div class="section-head"><h2>${isEdit ? 'Edit payment' : 'Payment from customer'}</h2><button class="btn-plain" data-action="close" type="button">Close</button></div>
+    <p class="lede">Money the customer paid you. It lowers what they owe.</p>
+    <form id="data-form" data-kind="sale">
+      <input type="hidden" name="kind" value="PAYMENT">
+      ${locked ? `<input type="hidden" name="customerId" value="${esc(state.customerId)}">` : `<label>Customer<select name="customerId" required><option value="">Choose customer…</option>${state.customers.map((c) => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(customerLabel(c))}</option>`).join('')}</select></label>`}
+      <label>Amount received (₹)<input name="amountInr" type="number" min="0.01" step="0.01" required inputmode="decimal" value="${esc(e.amountInr || '')}"></label>
+      <label>Date<input name="date" type="date" value="${esc((e.date || today()).slice(0, 10))}" required></label>
+      <label>Note (optional)<input name="note" autocomplete="off" value="${esc(e.note || '')}" placeholder="Cash, UPI, cheque no."></label>
+      <div class="form-actions">
+        ${isEdit ? '<button type="button" class="btn btn-soft" data-delete="sale">Delete</button>' : ''}
+        <button type="button" class="btn btn-soft" data-action="close">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </section></div>`;
+}
+
 function modal() {
   const kind = state.modal;
   if (kind === 'supplier') return supplierModal();
@@ -1566,7 +1824,9 @@ function modal() {
   if (kind === 'metalMaster') return metalMasterModal();
   if (kind === 'updateSheet') return updateSheetModal();
   if (kind === 'customer') return customerModal();
-  if (kind === 'sale' || kind === 'return') return saleModal(kind);
+  if (kind === 'sale' || kind === 'return') return state.editing?.kind === PAYMENT ? custPayModal() : saleModal(kind);
+  if (kind === 'custpay') return custPayModal();
+  if (kind === 'interaction') return interactionModal();
   if (kind === 'category') return categoryModal();
   return '';
 }
@@ -1643,7 +1903,7 @@ function logout() {
   state.pin = '';
   forgetLocalPin();
   forgetSessionUnlock();
-  state.view = 'parties';
+  state.view = 'today';
   state.error = null;
   landing();
 }
@@ -1675,6 +1935,18 @@ document.addEventListener('keydown', (event) => {
   render();
 });
 
+async function finishFollowUp(kind, id) {
+  const key = kind === 'customer' ? 'customers' : 'suppliers';
+  const list = state[key];
+  const row = list.find((r) => r.id === id);
+  if (!row) return;
+  requireNewScript(kind);
+  state[key] = upsertById(list, stamp({ ...row, followUpDate: '', followUpNote: '' }, false));
+  markDirty(key, id);
+  await persist();
+  render();
+}
+
 function applyTextSize() {
   document.documentElement.classList.toggle('big-text', Boolean(state.bigText));
 }
@@ -1685,8 +1957,8 @@ async function trashPhotos(ids) {
 }
 
 function requireNewScript(kind) {
-  if (state.scriptOutdated && ['customer', 'sale', 'category'].includes(kind)) {
-    throw new Error('Customers and photos need the newest Karigar script. Update the Apps Script (see the note at the top), then tap Refresh data.');
+  if (state.scriptOutdated && ['customer', 'supplier', 'sale', 'category', 'interaction'].includes(kind)) {
+    throw new Error('Customers, notes and photos need the newest Karigar script. Update the Apps Script (see the note at the top), then tap Refresh data.');
   }
 }
 
@@ -1740,7 +2012,7 @@ function bind() {
       if (target.dataset.edit) {
         const kind = target.dataset.edit;
         const id = target.dataset.id;
-        const lists = { supplier: state.suppliers, money: state.money, metal: state.metal, metalMaster: state.metalMaster, customer: state.customers, sale: state.sales, category: state.categories };
+        const lists = { supplier: state.suppliers, money: state.money, metal: state.metal, metalMaster: state.metalMaster, customer: state.customers, sale: state.sales, category: state.categories, interaction: state.interactions };
         const list = lists[kind] || state.settlements;
         state.editing = list.find((r) => r.id === id) || null;
         state.modal = kind === 'settle' ? 'settle' : kind;
@@ -1780,6 +2052,12 @@ function bind() {
         state.dealMetalCount = Math.min(6, Number(state.dealMetalCount || 1) + 1);
         render();
         return;
+      } else if (action === 'add-note') {
+        const isCustomer = target.dataset.kind === 'customer';
+        state.editing = { partyId: target.dataset.id, partyType: isCustomer ? 'CUSTOMER' : 'SUPPLIER' };
+        state.modal = 'interaction';
+        render();
+        return;
       } else if (action === 'tour-start') {
         state.tourStep = applyTourNav(state.tourStep, TOUR.length, 'start').step;
         render();
@@ -1814,6 +2092,16 @@ function bind() {
           state.reportTo = next.to;
         }
         render();
+      } else if (action === 'customer-filter') {
+        state.customerFilter = target.dataset.filter || 'all';
+        render();
+      } else if (action === 'refresh-rates') {
+        await loadRates(true);
+      } else if (action === 'use-suggest') {
+        const form = root.querySelector('form[data-kind="sale"]');
+        if (form) { form.elements.amountInr.value = target.dataset.amount; form.elements.amountInr.dispatchEvent(new Event('input', { bubbles: true })); }
+      } else if (action === 'followup-done') {
+        await finishFollowUp(target.dataset.kind, target.dataset.id);
       } else if (action === 'party-filter') {
         state.partyFilter = target.dataset.filter || 'all';
         render();
@@ -1853,6 +2141,21 @@ function bind() {
       updatePhotoPreview();
     };
   }
+  for (const name of ['metalType', 'purity', 'weightGrams']) {
+    const el = root.querySelector(`form[data-kind="sale"] [name="${name}"]`);
+    if (el) { el.addEventListener('input', updateRateSuggest); el.addEventListener('change', updateRateSuggest); }
+  }
+  updateRateSuggest();
+  const premium = root.querySelector('#premium-form');
+  if (premium) {
+    premium.onsubmit = (event) => event.preventDefault();
+    premium.elements.premium.onchange = () => {
+      state.premiumPct = Math.max(-20, Math.min(50, Number(premium.elements.premium.value) || 0));
+      try { localStorage.setItem(PREMIUM_KEY, String(state.premiumPct)); } catch { /* ignore */ }
+      refreshRateDom();
+    };
+  }
+  if (state.view === 'today' && state.unlocked && !state.ratesLoading && (!state.rates || ratesAreStale(state.rates.fetchedAt))) loadRates();
   const amountInput = root.querySelector('form[data-kind="sale"] input[name="amountInr"]');
   const paidInput = root.querySelector('form[data-kind="sale"] input[name="paidInr"]');
   if (amountInput && paidInput) {
@@ -1906,6 +2209,7 @@ async function onDelete(kind) {
     for (const item of state.money.filter((x) => x.supplierId === row.id)) markDeleted('money', item.id);
     for (const item of state.metal.filter((x) => x.supplierId === row.id)) markDeleted('metal', item.id);
     for (const item of state.settlements.filter((x) => x.supplierId === row.id)) markDeleted('settlements', item.id);
+    for (const item of state.interactions.filter((x) => x.partyId === row.id)) markDeleted('interactions', item.id);
     const next = deleteSupplierCascade(state, row.id);
     Object.assign(state, next);
     state.view = 'parties';
@@ -1924,15 +2228,21 @@ async function onDelete(kind) {
     photoIds.push(...state.sales.filter((x) => x.customerId === row.id).map((x) => x.photoId));
     markDeleted('customers', row.id);
     for (const item of state.sales.filter((x) => x.customerId === row.id)) markDeleted('sales', item.id);
+    for (const item of state.interactions.filter((x) => x.partyId === row.id)) markDeleted('interactions', item.id);
     Object.assign(state, removeCustomerData(state, row.id));
     state.view = 'customers';
     state.customerId = null;
   } else if (kind === 'sale') {
-    if (!confirm('Delete this sale / return? Its photo is removed too.')) return;
+    if (!confirm('Delete this entry? Its photo, if any, is removed too.')) return;
     requireNewScript('sale');
     photoIds.push(row.photoId);
     markDeleted('sales', row.id);
     state.sales = removeById(state.sales, row.id);
+  } else if (kind === 'interaction') {
+    if (!confirm('Delete this note?')) return;
+    requireNewScript('interaction');
+    markDeleted('interactions', row.id);
+    state.interactions = removeById(state.interactions, row.id);
   } else if (kind === 'category') {
     if (!confirm(`Remove ${row.category} from the ${row.metalType} item list? Old sales keep their item name.`)) return;
     markDeleted('categories', row.id);
@@ -2014,7 +2324,7 @@ async function submitForm(event) {
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
     let staleSalePhoto = '';
     if (kind === 'supplier') {
-      const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', notes: data.notes || '', status: 'ACTIVE' }, isNew);
+      const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', notes: data.notes || '', status: 'ACTIVE', email: String(data.email || '').trim(), address: String(data.address || '').trim(), tag: data.tag || '', followUpDate: data.followUpDate || '', followUpNote: String(data.followUpNote || '').trim(), gstin: String(data.gstin || '').trim() }, isNew);
       state.suppliers = upsertById(state.suppliers, row);
       markDirty('suppliers', id);
       if (isNew && Number(data.openingMoney) > 0) {
@@ -2088,13 +2398,28 @@ async function submitForm(event) {
       }, isNew));
       markDirty('settlements', id);
     } else if (kind === 'customer') {
-      const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', city: data.city || '', notes: data.notes || '', status: 'ACTIVE' }, isNew);
+      const row = stamp({ ...(state.editing || {}), id, name: assertPartyName(data.name), phone: data.phone || '', city: data.city || '', notes: data.notes || '', status: 'ACTIVE', email: String(data.email || '').trim(), address: String(data.address || '').trim(), tag: data.tag || '', followUpDate: data.followUpDate || '', followUpNote: String(data.followUpNote || '').trim(), birthday: data.birthday || '', anniversary: data.anniversary || '' }, isNew);
       state.customers = upsertById(state.customers, row);
       markDirty('customers', id);
       if (isNew) {
         state.view = 'customer';
         state.customerId = row.id;
       }
+    } else if (kind === 'sale' && data.kind === PAYMENT) {
+      const v = validatePayment(data);
+      state.sales = upsertById(state.sales, stamp({
+        ...(state.editing || {}), id, customerId: data.customerId, kind: PAYMENT, category: '', metalType: '', purity: '',
+        weightGrams: 0, amountInr: v.amount, paidInr: v.amount, date: data.date, note: data.note || '', photoId: '', photoUrl: ''
+      }, isNew));
+      markDirty('sales', id);
+    } else if (kind === 'interaction') {
+      const text = String(data.text || '').trim();
+      if (!text) throw new Error('Write a short note');
+      const partyType = data.partyType || (state.editing?.partyType || '');
+      state.interactions = upsertById(state.interactions, stamp({
+        ...(state.editing || {}), id, partyId: data.partyId, partyType, kind: data.kind || 'Note', text, date: data.date
+      }, isNew));
+      markDirty('interactions', id);
     } else if (kind === 'sale') {
       const v = validateSale(data);
       const old = state.editing || {};
@@ -2177,6 +2502,8 @@ async function submitForm(event) {
 }
 
 async function enterUnlocked() {
+  loadSavedRates();
+  loadRates();
   const cache = readCache();
   if (cache) applyLoaded(cache);
   else {

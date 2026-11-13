@@ -62,13 +62,15 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
   const css = fs.readFileSync(path.join(pwa, 'styles.css'), 'utf8');
   assert.match(js, /Hume dena/);
-  assert.match(js, /Unse lena/);
+  assert.match(js, /LABEL\.weGet/);
+  assert.doesNotMatch(js, /Unse lena/);
   assert.match(js, /data-view="parties"/);
   assert.match(js, /data-view="report"/);
   assert.match(js, /data-view="masters"/);
   assert.match(js, /metalMaster/);
   assert.match(js, /shop-nav/);
-  assert.match(js, /Give metal|Metal diya/);
+  assert.match(js, /LABEL\.supplier\.metalGiven/);
+  assert.doesNotMatch(js, /Metal diya|Metal aaya|Gave metal|Got metal/);
   assert.match(js, /New shop/);
   assert.match(js, /copy-script|Copy script/);
   assert.match(js, /admitUnlock/);

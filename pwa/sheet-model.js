@@ -7,16 +7,17 @@ export const SCHEMA_VERSION = '1';
 
 export const HEADERS = {
   _Meta: ['key', 'value'],
-  Suppliers: ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id'],
+  Suppliers: ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id', 'email', 'address', 'gstin', 'tag', 'followUpDate', 'followUpNote'],
   Money: ['date', 'supplierName', 'type', 'amountInr', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'],
   Metal: ['date', 'supplierName', 'direction', 'metalType', 'purity', 'weightGrams', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'],
   Settlements: ['date', 'supplierName', 'moneyAmountInr', 'metalType', 'purity', 'metalGrams', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'],
   Khata: ['supplierName', 'status', 'moneyDirection', 'moneyInr', 'gold24k', 'gold22k', 'gold18k', 'gold14k', 'silver999', 'silver925', 'weOweInr', 'theyOweInr', 'updatedAt', 'supplierId'],
   MetalMaster: ['metalType', 'purity', 'rateInrPerGram', 'status', 'createdAt', 'updatedAt', 'id'],
-  Customers: ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id'],
+  Customers: ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id', 'email', 'address', 'birthday', 'anniversary', 'tag', 'followUpDate', 'followUpNote'],
   Sales: ['date', 'customerName', 'kind', 'category', 'metalType', 'purity', 'weightGrams', 'amountInr', 'paidInr', 'note', 'photoId', 'photoUrl', 'createdAt', 'updatedAt', 'customerId', 'id'],
   Categories: ['metalType', 'category', 'status', 'createdAt', 'updatedAt', 'id'],
-  CustomerKhata: ['customerName', 'phone', 'balanceDirection', 'balanceInr', 'metalSummary', 'lastActivity', 'updatedAt', 'customerId']
+  CustomerKhata: ['customerName', 'phone', 'balanceDirection', 'balanceInr', 'metalSummary', 'lastActivity', 'updatedAt', 'customerId'],
+  Interactions: ['date', 'partyType', 'partyName', 'kind', 'text', 'createdAt', 'updatedAt', 'partyId', 'id']
 };
 
 /** Place each field under the sheet column whose header matches the key — never by array index. */
@@ -69,7 +70,8 @@ export function emptyLedger() {
     metalMaster: seedMetalMaster([]),
     customers: [],
     sales: [],
-    categories: seedCategories([])
+    categories: seedCategories([]),
+    interactions: []
   };
 }
 
@@ -240,9 +242,10 @@ export function isDemoLedgerRow(row) {
   if (!row) return false;
   const id = String(row.id || '').trim();
   const supplierId = String(row.supplierId || '').trim();
+  const partyId = String(row.partyId || '').trim();
   const customerId = String(row.customerId || '').trim();
   const name = String(row.name || row.supplierName || '').trim();
-  if (id.startsWith('demo-') || supplierId.startsWith('demo-') || customerId.startsWith('demo-')) return true;
+  if (id.startsWith('demo-') || supplierId.startsWith('demo-') || customerId.startsWith('demo-') || partyId.startsWith('demo-')) return true;
   if (DEMO_PARTY_NAMES.includes(name) || DEMO_PARTY_NAMES.includes(id)) return true;
   return false;
 }
@@ -254,7 +257,7 @@ function dropDemoIdRows(list) {
 export function stripDemoLedger(ledger) {
   const current = ledger || emptyLedger();
   const next = { ...current };
-  for (const key of ['suppliers', 'money', 'metal', 'settlements', 'customers', 'sales']) {
+  for (const key of ['suppliers', 'money', 'metal', 'settlements', 'customers', 'sales', 'interactions']) {
     next[key] = dropDemoIdRows(current[key]);
   }
   next.metalMaster = current.metalMaster || [];
@@ -294,6 +297,11 @@ export function withCustomerNames(rows, customers) {
   }));
 }
 
+export function withPartyNames(rows, suppliers, customers) {
+  const names = Object.fromEntries([...(suppliers || []), ...(customers || [])].map((p) => [p.id, partyDisplayName(p)]));
+  return (rows || []).map((row) => ({ ...row, partyName: names[row.partyId] || humanName(row.partyName) || '' }));
+}
+
 export function deleteSupplierCascade(ledger, supplierId) {
   const id = String(supplierId || '');
   return {
@@ -301,13 +309,14 @@ export function deleteSupplierCascade(ledger, supplierId) {
     suppliers: removeById(ledger.suppliers || [], id),
     money: (ledger.money || []).filter((row) => String(row.supplierId) !== id),
     metal: (ledger.metal || []).filter((row) => String(row.supplierId) !== id),
-    settlements: (ledger.settlements || []).filter((row) => String(row.supplierId) !== id)
+    settlements: (ledger.settlements || []).filter((row) => String(row.supplierId) !== id),
+    interactions: (ledger.interactions || []).filter((row) => String(row.partyId) !== id)
   };
 }
 
 export function moneyDirectionLabel(payable) {
   if (Number(payable) > 0) return 'Hume dena';
-  if (Number(payable) < 0) return 'Unse lena';
+  if (Number(payable) < 0) return 'Hume lena';
   return 'Square';
 }
 
@@ -323,9 +332,11 @@ export function mergeJournals(remote, local, { deletedIds = [], dirtyIds = [] } 
     out.push(dirty.has(id) && localById[id] ? localById[id] : row);
     used.add(id);
   }
+  // A row only this device has is kept while it is unsaved (dirty). If it is clean, another device or
+  // the Sheet itself deleted it, and bringing it back would undo that deletion.
   for (const row of local || []) {
     const id = String(row?.id || '');
-    if (!id || used.has(id) || deleted.has(id)) continue;
+    if (!id || used.has(id) || deleted.has(id) || !dirty.has(id)) continue;
     out.push(row);
   }
   return out;
@@ -383,6 +394,7 @@ export function prepareSavePayload(ledger, now = new Date()) {
     customers,
     sales: withCustomerNames(ledger.sales || [], customers),
     categories: seedCategories(ledger.categories || [], now),
-    customerKhata: buildCustomerBalanceRows(customers, ledger.sales || [], now)
+    customerKhata: buildCustomerBalanceRows(customers, ledger.sales || [], now),
+    interactions: withPartyNames(ledger.interactions || [], suppliers, customers)
   };
 }

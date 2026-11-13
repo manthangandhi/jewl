@@ -1,3 +1,5 @@
+import { LABEL } from './labels.js';
+
 export const GOLD_PURITIES = ['24K', '22K', '18K', '14K'];
 export const SILVER_PURITIES = ['999', '925'];
 export const PLATINUM_PURITIES = ['950', '900'];
@@ -136,7 +138,7 @@ export function buildPassbook({ supplierId, money = [], metal = [], settlements 
     });
   }
   for (const row of metal.filter((item) => item.supplierId === supplierId)) {
-    const label = row.direction === 'RECEIPT' ? 'Metal aaya' : row.direction === 'OPENING' ? 'Opening metal' : 'Metal diya';
+    const label = row.direction === 'RECEIPT' ? LABEL.supplier.metalReceived : row.direction === 'OPENING' ? LABEL.supplier.openingMetal : LABEL.supplier.metalGiven;
     events.push({
       id: row.id,
       kind: 'metal',
@@ -251,7 +253,7 @@ export function reportForRange({
   });
   const lines = [
     ...moneyRows.map((row) => line('money', row, row.type === 'PAYMENT' ? 'Payment' : row.type === 'OPENING' ? 'Opening' : 'Purchase', Number(row.amountInr || 0))),
-    ...metalRows.map((row) => line('metal', row, row.direction === 'RECEIPT' ? 'Metal aaya' : row.direction === 'ISSUE' ? 'Metal diya' : 'Opening metal', Number(row.weightGrams || 0))),
+    ...metalRows.map((row) => line('metal', row, row.direction === 'RECEIPT' ? LABEL.supplier.metalReceived : row.direction === 'ISSUE' ? LABEL.supplier.metalGiven : 'Opening metal', Number(row.weightGrams || 0))),
     ...settleRows.map((row) => line('settle', row, 'Settlement', Number(row.moneyAmountInr || 0)))
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return {

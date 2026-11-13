@@ -15,7 +15,8 @@ export function toLedgerSnapshot(data) {
     metalMaster: Array.isArray(data?.metalMaster) ? data.metalMaster : [],
     customers: Array.isArray(data?.customers) ? data.customers : [],
     sales: Array.isArray(data?.sales) ? data.sales : [],
-    categories: Array.isArray(data?.categories) ? data.categories : []
+    categories: Array.isArray(data?.categories) ? data.categories : [],
+    interactions: Array.isArray(data?.interactions) ? data.interactions : []
   };
 }
 

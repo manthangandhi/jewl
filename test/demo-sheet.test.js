@@ -39,9 +39,9 @@ test('Sheet seed replaces demo- ids and keeps live parties and shop name', () =>
 test('demo objects use the same keys as Sheet headers, in the write order name-first id-last', () => {
   const partyKeys = ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id'];
   const moneyKeys = ['date', 'supplierName', 'type', 'amountInr', 'note', 'createdAt', 'updatedAt', 'supplierId', 'id'];
-  assert.match(gs, /Suppliers: \["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id"\]/);
+  assert.match(gs, /Suppliers: \["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id", "email"/);
   assert.match(gs, /Money: \["date", "supplierName", "type", "amountInr", "note", "createdAt", "updatedAt", "supplierId", "id"\]/);
-  assert.match(gs, /return \{ id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s\.createdAt, updatedAt: s\.updatedAt \}/);
+  assert.match(gs, /const row = \{ id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s\.createdAt, updatedAt: s\.updatedAt \}/);
   assert.match(gs, /return \{ id: id, supplierId: supplierId, supplierName: names\[supplierId\] \|\| "", type: type, amountInr: amount, note: note, date: s\.date, createdAt: s\.createdAt, updatedAt: s\.updatedAt \}/);
   assert.match(gs, /headers\.map\(function \(key\) \{/);
   for (const key of partyKeys) assert.match(gs, new RegExp(`"${key}"`));

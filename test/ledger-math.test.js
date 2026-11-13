@@ -18,7 +18,7 @@ test('passbook is newest-first with running money after each line', () => {
   assert.equal(lines[0].kind, 'money');
   assert.equal(lines[0].runningInr, 6000);
   assert.equal(lines[1].kind, 'metal');
-  assert.equal(lines[1].label, 'Metal diya');
+  assert.equal(lines[1].label, 'Metal given');
   assert.equal(lines[2].runningInr, 10000);
 });
 

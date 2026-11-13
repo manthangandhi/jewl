@@ -45,7 +45,9 @@ The newest app adds customers, sale/return entries with photos, and metal item t
 5. **Deploy → Manage deployments → pencil → New version → Deploy.** The `/exec` URL stays the same.
 6. In the app tap **Refresh data**.
 
-New tabs: `Customers`, `Sales` (one row per sold / returned item, with a Drive link to the photo), `Categories`, and `CustomerKhata` (balance and metal per customer, readable by your CA).
+New tabs: `Customers`, `Sales` (one row per sale, return or customer payment, with a Drive link to any photo), `Categories`, `Interactions` (notes and calls for every supplier and customer) and `CustomerKhata` (balance and metal per customer, readable by your CA). `Suppliers` and `Customers` also gain email, address, follow-up date and, for customers, birthday and anniversary columns.
+
+Live gold, silver and platinum rates come straight from free public price feeds (gold-api.com and open.er-api.com) in the browser. Nothing about your shop is sent to them. They show the international price in rupees; add your local difference on the Today page, or type a board rate on the Metals page, which always wins.
 
 ## 1. Create the spreadsheet
 

@@ -24,19 +24,20 @@ const LOCAL_TIMEZONE = "Asia/Kolkata";
 
 const HEADERS = {
   _Meta: ["key", "value"],
-  Suppliers: ["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id"],
+  Suppliers: ["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id", "email", "address", "gstin", "tag", "followUpDate", "followUpNote"],
   Money: ["date", "supplierName", "type", "amountInr", "note", "createdAt", "updatedAt", "supplierId", "id"],
   Metal: ["date", "supplierName", "direction", "metalType", "purity", "weightGrams", "note", "createdAt", "updatedAt", "supplierId", "id"],
   Settlements: ["date", "supplierName", "moneyAmountInr", "metalType", "purity", "metalGrams", "note", "createdAt", "updatedAt", "supplierId", "id"],
   Khata: ["supplierName", "status", "moneyDirection", "moneyInr", "gold24k", "gold22k", "gold18k", "gold14k", "silver999", "silver925", "weOweInr", "theyOweInr", "updatedAt", "supplierId"],
   MetalMaster: ["metalType", "purity", "rateInrPerGram", "status", "createdAt", "updatedAt", "id"],
-  Customers: ["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id"],
+  Customers: ["name", "phone", "city", "notes", "status", "createdAt", "updatedAt", "id", "email", "address", "birthday", "anniversary", "tag", "followUpDate", "followUpNote"],
   Sales: ["date", "customerName", "kind", "category", "metalType", "purity", "weightGrams", "amountInr", "paidInr", "note", "photoId", "photoUrl", "createdAt", "updatedAt", "customerId", "id"],
   Categories: ["metalType", "category", "status", "createdAt", "updatedAt", "id"],
-  CustomerKhata: ["customerName", "phone", "balanceDirection", "balanceInr", "metalSummary", "lastActivity", "updatedAt", "customerId"]
+  CustomerKhata: ["customerName", "phone", "balanceDirection", "balanceInr", "metalSummary", "lastActivity", "updatedAt", "customerId"],
+  Interactions: ["date", "partyType", "partyName", "kind", "text", "createdAt", "updatedAt", "partyId", "id"]
 };
 
-const TAB_ORDER = ["Khata", "CustomerKhata", "Suppliers", "Customers", "Money", "Metal", "Settlements", "Sales", "MetalMaster", "Categories", "_Meta"];
+const TAB_ORDER = ["Khata", "CustomerKhata", "Suppliers", "Customers", "Money", "Metal", "Settlements", "Sales", "Interactions", "MetalMaster", "Categories", "_Meta"];
 
 function spreadsheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -242,9 +243,11 @@ function demoLedger_() {
     "demo-gupta": "Gupta Casting Co",
     "demo-kiran": "Kiran Chain Maker"
   };
-  function party(id, name, phone, city, notes, ago) {
+  function party(id, name, phone, city, notes, ago, extra) {
     const s = t(ago);
-    return { id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
+    const row = { id: id, name: name, phone: phone, city: city, notes: notes, status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
+    Object.keys(extra || {}).forEach(function (k) { row[k] = extra[k]; });
+    return row;
   }
   function money(id, supplierId, type, amount, note, ago) {
     const s = t(ago);
@@ -259,10 +262,18 @@ function demoLedger_() {
     return { id: id, supplierId: supplierId, supplierName: names[supplierId] || "", moneyAmountInr: cash, metalType: metalType || "", purity: purity || "", metalGrams: grams || 0, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
   const now = t(0);
-  function customer(id, name, phone, city, ago) {
+  function customer(id, name, phone, city, ago, extra) {
     const s = t(ago);
-    return { id: id, name: name, phone: phone, city: city, notes: "Demo customer", status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
+    const row = { id: id, name: name, phone: phone, city: city, notes: "Demo customer", status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
+    Object.keys(extra || {}).forEach(function (k) { row[k] = extra[k]; });
+    return row;
   }
+  function note(id, partyType, partyId, partyName, kind, text, ago) {
+    const s = t(ago);
+    return { id: id, partyType: partyType, partyId: partyId, partyName: partyName, kind: kind, text: text, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+  // Birthdays use a fixed year so only the day and month matter.
+  function mmdd(daysAhead) { return "1985-" + isoDaysAgo_(-daysAhead).slice(5); }
   const custNames = {
     "demo-c-anita": "Anita Deshmukh",
     "demo-c-rakesh": "Rakesh Bhatia",
@@ -275,10 +286,15 @@ function demoLedger_() {
   }
   return {
     customers: [
-      customer("demo-c-anita", custNames["demo-c-anita"], "98230 11001", "Pune", 80),
-      customer("demo-c-rakesh", custNames["demo-c-rakesh"], "98190 22002", "Mumbai", 70),
-      customer("demo-c-meena", custNames["demo-c-meena"], "99201 33003", "Thane", 55),
-      customer("demo-c-sunil", custNames["demo-c-sunil"], "97300 44004", "Nashik", 40)
+      customer("demo-c-anita", custNames["demo-c-anita"], "98230 11001", "Pune", 80, { tag: "VIP", email: "anita@example.com", birthday: mmdd(3), followUpDate: isoDaysAgo_(0), followUpNote: "Show new mangalsutra designs" }),
+      customer("demo-c-rakesh", custNames["demo-c-rakesh"], "98190 22002", "Mumbai", 70, { tag: "Regular", anniversary: mmdd(5), followUpDate: isoDaysAgo_(2), followUpNote: "Balance payment pending" }),
+      customer("demo-c-meena", custNames["demo-c-meena"], "99201 33003", "Thane", 55, { tag: "Regular" }),
+      customer("demo-c-sunil", custNames["demo-c-sunil"], "97300 44004", "Nashik", 40, { tag: "Wholesale", address: "Shop 12, Main Road, Nashik" })
+    ],
+    interactions: [
+      note("demo-i-1", "CUSTOMER", "demo-c-anita", custNames["demo-c-anita"], "Call", "Asked about 22K bangles for the wedding in March", 9),
+      note("demo-i-2", "CUSTOMER", "demo-c-rakesh", custNames["demo-c-rakesh"], "Visit", "Came in for the ring, promised to clear the balance", 19),
+      note("demo-i-3", "SUPPLIER", "demo-ramesh", "Ramesh Karigar", "Call", "New wedding set ready by Friday", 4)
     ],
     sales: [
       sale("demo-s-01", "demo-c-anita", "SALE", "Mangalsutra", "GOLD", "22K", 18.5, 138000, 100000, "Wedding order, balance later", 60),
@@ -294,7 +310,7 @@ function demoLedger_() {
     ],
     shopName: "Mehta Jewellers",
     suppliers: [
-      party("demo-ramesh", "Ramesh Karigar", "98200 11122", "Mumbai", "22K jobwork — Zaveri Bazaar", 90),
+      party("demo-ramesh", "Ramesh Karigar", "98200 11122", "Mumbai", "22K jobwork — Zaveri Bazaar", 90, { tag: "Karigar", followUpDate: isoDaysAgo_(-1), followUpNote: "Collect the finished wedding set" }),
       party("demo-suresh", "Suresh Jewels", "98765 44001", "Ahmedabad", "Wholesale gold supplier", 90),
       party("demo-mehta", "Mehta Silver House", "90909 22110", "Rajkot", "Silver 999 / 925", 90),
       party("demo-fatima", "Fatima Polishing Works", "99887 66554", "Surat", "Polishing — often takes advance", 90),
@@ -366,9 +382,10 @@ function isDemoRow_(row) {
   if (!row) return false;
   const id = String(row.id || "").trim();
   const supplierId = String(row.supplierId || "").trim();
+  const partyId = String(row.partyId || "").trim();
   const customerId = String(row.customerId || "").trim();
   const name = String(row.name || row.supplierName || "").trim();
-  if (isDemoId_(id) || isDemoId_(supplierId) || isDemoId_(customerId)) return true;
+  if (isDemoId_(id) || isDemoId_(supplierId) || isDemoId_(customerId) || isDemoId_(partyId)) return true;
   if (DEMO_PARTY_NAMES.indexOf(name) !== -1 || DEMO_PARTY_NAMES.indexOf(id) !== -1) return true;
   return false;
 }
@@ -402,6 +419,7 @@ function seedDemoLedger_(opt) {
   writeObjectsAsRows_("Customers", customerRows);
   writeObjectsAsRows_("Sales", salesRows);
   writeObjectsAsRows_("CustomerKhata", buildCustomerKhataRows_(customerRows, salesRows));
+  writeObjectsAsRows_("Interactions", dropDemoRows_(readRowsAsObjects_("Interactions")).concat(demo.interactions));
   const master = readRowsAsObjects_("MetalMaster");
   const byId = {};
   master.concat(demo.metalMaster).forEach(function (row) { if (row.id) byId[row.id] = row; });
@@ -425,6 +443,7 @@ function clearDemoLedger_() {
   writeObjectsAsRows_("Customers", customerRows);
   writeObjectsAsRows_("Sales", salesRows);
   writeObjectsAsRows_("CustomerKhata", buildCustomerKhataRows_(customerRows, salesRows));
+  writeObjectsAsRows_("Interactions", dropDemoRows_(readRowsAsObjects_("Interactions")));
   return { ok: true, cleared: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
 }
 
@@ -442,7 +461,8 @@ function loadLedger_() {
     customers: readRowsAsObjects_("Customers"),
     sales: readRowsAsObjects_("Sales"),
     categories: readRowsAsObjects_("Categories"),
-    features: ["customers", "photos", "categories"]
+    interactions: readRowsAsObjects_("Interactions"),
+    features: ["customers", "photos", "categories", "crm"]
   };
 }
 
@@ -457,6 +477,7 @@ function saveLedger_(body) {
   if (Array.isArray(body.customers)) writeObjectsAsRows_("Customers", body.customers);
   if (Array.isArray(body.sales)) writeObjectsAsRows_("Sales", body.sales);
   if (Array.isArray(body.categories)) writeObjectsAsRows_("Categories", body.categories);
+  if (Array.isArray(body.interactions)) writeObjectsAsRows_("Interactions", body.interactions);
   if (Array.isArray(body.customerKhata)) writeObjectsAsRows_("CustomerKhata", body.customerKhata);
   writeObjectsAsRows_("Khata", Array.isArray(body.khata) ? body.khata : (Array.isArray(body.balances) ? body.balances : []));
   hideLegacyBalances_();
@@ -563,7 +584,7 @@ function buildKhataRows_(suppliers, money, metal, settlements) {
       if (!field) return;
       grams[field] -= Number(row.metalGrams || 0);
     });
-    const dir = payable > 0 ? "Hume dena" : payable < 0 ? "Unse lena" : "Square";
+    const dir = payable > 0 ? "Hume dena" : payable < 0 ? "Hume lena" : "Square";
     return {
       supplierName: supplier.name || "",
       status: supplier.status || "ACTIVE",
@@ -592,10 +613,10 @@ function buildCustomerKhataRows_(customers, sales) {
     (sales || []).forEach(function (row) {
       if (row.customerId !== customer.id) return;
       const sign = row.kind === "RETURN" ? -1 : 1;
-      balance += sign * (Number(row.amountInr || 0) - Number(row.paidInr || 0));
+      if (row.kind === "PAYMENT") { balance -= Number(row.amountInr || 0); } else { balance += sign * (Number(row.amountInr || 0) - Number(row.paidInr || 0)); }
       const d = String(row.date || "").slice(0, 10);
       if (d > last) last = d;
-      if (row.metalType && row.purity) {
+      if (row.kind !== "PAYMENT" && row.metalType && row.purity) {
         const key = String(row.metalType).toUpperCase() + " " + row.purity;
         metal[key] = (metal[key] || 0) + sign * Number(row.weightGrams || 0);
       }
@@ -605,7 +626,7 @@ function buildCustomerKhataRows_(customers, sales) {
     return {
       customerName: customer.name || "",
       phone: customer.phone || "",
-      balanceDirection: balance > 0 ? "Unse lena" : balance < 0 ? "Hume dena" : "Square",
+      balanceDirection: balance > 0 ? "Hume lena" : balance < 0 ? "Hume dena" : "Square",
       balanceInr: Math.abs(balance),
       metalSummary: summary,
       lastActivity: last,

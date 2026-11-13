@@ -49,7 +49,7 @@ test('customer summary totals who owes whom', () => {
 
 test('passbook lists newest first with a running balance', () => {
   const lines = buildCustomerPassbook('c1', sales);
-  assert.deepEqual(lines.map((l) => l.label), ['Returned', 'Sold', 'Sold']);
+  assert.deepEqual(lines.map((l) => l.label), ['Return', 'Sale', 'Sale']);
   assert.equal(lines[0].runningInr, 12000);
   assert.equal(lines.at(-1).runningInr, 50000);
   assert.match(lines[2].detail, /Chain, Gold 22K, 20 g/);
@@ -88,7 +88,7 @@ test('save payload carries customers, named sales, categories and a customer kha
   assert.equal(payload.customers.length, 1);
   assert.equal(payload.sales[0].customerName, 'Anita');
   assert.ok(payload.categories.length > 10);
-  assert.equal(payload.customerKhata[0].balanceDirection, 'Unse lena');
+  assert.equal(payload.customerKhata[0].balanceDirection, 'Hume lena');
   assert.equal(payload.customerKhata[0].balanceInr, 50000);
   assert.match(payload.customerKhata[0].metalSummary, /GOLD 22K 20 g/);
   assert.equal(withCustomerNames([{ customerId: 'c1' }], [{ id: 'c1', name: 'Anita' }])[0].customerName, 'Anita');

@@ -1,7 +1,10 @@
-/** Customer side of the shop: what we sold to a customer and what they returned. */
+import { LABEL, balanceName } from './labels.js';
+
+/** Customer side of the shop: what we sold, what came back, and what the customer paid. */
 
 export const SALE = 'SALE';
 export const RETURN = 'RETURN';
+export const PAYMENT = 'PAYMENT';
 
 const DEFAULT_CATEGORIES = {
   GOLD: ['Chain', 'Mangalsutra', 'Ring', 'Earrings', 'Bangles', 'Bracelet', 'Necklace', 'Pendant', 'Nose pin', 'Coin', 'Bar', 'Other'],
@@ -42,19 +45,21 @@ export function categoriesForType(categories, metalType) {
 const num = (v) => Number(v || 0);
 const titleCase = (v) => String(v || '').toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
 const sign = (row) => (row.kind === RETURN ? -1 : 1);
+/** How one entry moves the balance: positive means the customer owes us more. */
+const delta = (row) => (row.kind === PAYMENT ? -num(row.amountInr) : sign(row) * (num(row.amountInr) - num(row.paidInr)));
 
 /** Positive = the customer owes the shop. Negative = the shop owes the customer. */
 export function customerBalance(sales, customerId) {
   return (sales || [])
     .filter((row) => row.customerId === customerId)
-    .reduce((sum, row) => sum + sign(row) * (num(row.amountInr) - num(row.paidInr)), 0);
+    .reduce((sum, row) => sum + delta(row), 0);
 }
 
 /** Net grams the customer is holding from us, e.g. { 'GOLD:22K': 12.5 }. */
 export function customerMetalNet(sales, customerId) {
   const out = {};
   for (const row of sales || []) {
-    if (row.customerId !== customerId || !row.metalType || !row.purity) continue;
+    if (row.customerId !== customerId || row.kind === PAYMENT || !row.metalType || !row.purity) continue;
     const key = `${String(row.metalType).toUpperCase()}:${row.purity}`;
     out[key] = (out[key] || 0) + sign(row) * num(row.weightGrams);
   }
@@ -98,13 +103,13 @@ export function buildCustomerPassbook(customerId, sales) {
     .sort((a, b) => a.sort.localeCompare(b.sort) || String(a.row.id).localeCompare(String(b.row.id)));
   let running = 0;
   const lines = sorted.map(({ row }) => {
-    const delta = sign(row) * (num(row.amountInr) - num(row.paidInr));
-    running += delta;
+    running += delta(row);
     const grams = num(row.weightGrams);
+    const isPayment = row.kind === PAYMENT;
     return {
       id: row.id,
-      kind: row.kind === RETURN ? 'return' : 'sale',
-      label: row.kind === RETURN ? 'Returned' : 'Sold',
+      kind: isPayment ? 'payment' : row.kind === RETURN ? 'return' : 'sale',
+      label: isPayment ? LABEL.customer.payment : row.kind === RETURN ? LABEL.customer.return : LABEL.customer.sale,
       date: row.date,
       category: row.category || '',
       detail: [row.category, `${titleCase(row.metalType)} ${row.purity || ''}`.trim(), grams ? `${grams} g` : '']
@@ -133,7 +138,7 @@ function inRange(row, from, to) {
 export function categoryTotals(sales, { from = '', to = '' } = {}) {
   const map = {};
   for (const row of sales || []) {
-    if (!inRange(row, from, to)) continue;
+    if (!inRange(row, from, to) || row.kind === PAYMENT) continue;
     const metalType = String(row.metalType || '').toUpperCase() || 'OTHER';
     const category = String(row.category || '').trim() || 'Uncategorised';
     const key = `${metalType}|${category}`;
@@ -158,15 +163,24 @@ export function categoryTotals(sales, { from = '', to = '' } = {}) {
 
 export function salesPeriodTotals(sales, range = {}) {
   const rows = (sales || []).filter((row) => inRange(row, range.from, range.to));
-  const sum = (kind, field) => rows.filter((row) => (kind === RETURN ? row.kind === RETURN : row.kind !== RETURN))
+  const sum = (kind, field) => rows.filter((row) => (kind === RETURN ? row.kind === RETURN : kind === PAYMENT ? row.kind === PAYMENT : row.kind !== RETURN && row.kind !== PAYMENT))
     .reduce((n, row) => n + num(row[field]), 0);
   return {
     soldInr: sum(SALE, 'amountInr'),
     returnedInr: sum(RETURN, 'amountInr'),
+    receivedInr: sum(PAYMENT, 'amountInr'),
     soldGrams: sum(SALE, 'weightGrams'),
     returnedGrams: sum(RETURN, 'weightGrams'),
     count: rows.length
   };
+}
+
+/** A payment from a customer needs only who paid and how much. */
+export function validatePayment(data = {}) {
+  if (!data.customerId) throw new Error('Choose the customer');
+  const amount = num(data.amountInr);
+  if (!(amount > 0)) throw new Error('Enter the amount received in rupees');
+  return { amount };
 }
 
 /** Throws a plain-language Error when the entry cannot be saved. */
@@ -189,7 +203,8 @@ export function removeCustomerData(ledger, customerId) {
   return {
     ...ledger,
     customers: (ledger.customers || []).filter((row) => String(row.id) !== id),
-    sales: (ledger.sales || []).filter((row) => String(row.customerId) !== id)
+    sales: (ledger.sales || []).filter((row) => String(row.customerId) !== id),
+    interactions: (ledger.interactions || []).filter((row) => String(row.partyId) !== id)
   };
 }
 
@@ -198,7 +213,7 @@ export function buildCustomerBalanceRows(customers, sales, now = new Date()) {
   return summarizeCustomers(customers, sales).byCustomer.map((row) => ({
     customerName: row.name,
     phone: row.phone,
-    balanceDirection: row.balance > 0 ? 'Unse lena' : row.balance < 0 ? 'Hume dena' : 'Square',
+    balanceDirection: balanceName(row.balance),
     balanceInr: Math.abs(row.balance),
     metalSummary: Object.entries(row.metalNet).map(([key, g]) => `${key.replace(':', ' ')} ${Number(g.toFixed(3))} g`).join('; '),
     lastActivity: row.lastDate,

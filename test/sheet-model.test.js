@@ -31,7 +31,7 @@ test('records land in the column whose header matches the field, not in array or
 });
 
 test('sheet tabs include a CA-readable Khata report with ids last', () => {
-  assert.deepEqual(Object.keys(HEADERS), ['_Meta', 'Suppliers', 'Money', 'Metal', 'Settlements', 'Khata', 'MetalMaster', 'Customers', 'Sales', 'Categories', 'CustomerKhata']);
+  assert.deepEqual(Object.keys(HEADERS), ['_Meta', 'Suppliers', 'Money', 'Metal', 'Settlements', 'Khata', 'MetalMaster', 'Customers', 'Sales', 'Categories', 'CustomerKhata', 'Interactions']);
   assert.ok(HEADERS.Money.includes('supplierName'));
   assert.equal(HEADERS.Money[0], 'date');
   assert.equal(HEADERS.Money.at(-1), 'id');
@@ -231,7 +231,7 @@ test('prepareSavePayload writes supplier names and party balances for the sheet'
   assert.equal(payload.meta.schemaVersion, '1');
 });
 
-test('mergeJournals keeps CA-added rows and local edits, drops local deletes', async () => {
+test('mergeJournals keeps CA-added rows, unsaved local rows and edits, drops local deletes and rows deleted elsewhere', async () => {
   const { mergeJournals } = await import('../pwa/sheet-model.js');
   const remote = [
     { id: 'a', amountInr: 10 },
@@ -242,8 +242,10 @@ test('mergeJournals keeps CA-added rows and local edits, drops local deletes', a
     { id: 'a', amountInr: 12 },
     { id: 'mine', amountInr: 5 }
   ];
-  const merged = mergeJournals(remote, local, { deletedIds: ['b'], dirtyIds: ['a'] });
+  const merged = mergeJournals(remote, local, { deletedIds: ['b'], dirtyIds: ['a', 'mine'] });
   assert.deepEqual(merged.map((r) => r.id), ['a', 'ca-new', 'mine']);
+  const gone = mergeJournals(remote, [...local, { id: 'old', amountInr: 1 }], { deletedIds: ['b'], dirtyIds: ['a'] });
+  assert.deepEqual(gone.map((r) => r.id), ['a', 'ca-new']);
   assert.equal(merged[0].amountInr, 12);
   assert.equal(merged.find((r) => r.id === 'ca-new').amountInr, 3);
 });

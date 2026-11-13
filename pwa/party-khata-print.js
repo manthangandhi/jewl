@@ -4,7 +4,7 @@ const g = (v) => `${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigi
 function moneyLabel(payable) {
   const n = Number(payable || 0);
   if (n > 0) return { label: 'Hume dena', amount: n };
-  if (n < 0) return { label: 'Unse lena', amount: -n };
+  if (n < 0) return { label: 'Hume lena', amount: -n };
   return { label: 'Square', amount: 0 };
 }
 
