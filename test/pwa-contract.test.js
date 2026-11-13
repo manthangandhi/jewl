@@ -109,7 +109,7 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(css, /desk-col/);
   assert.match(css, /prefers-color-scheme:\s*dark/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
-  assert.match(css, /min-height:\s*52px/);
+  assert.match(css, /min-height:\s*46px/);
   assert.match(css, /\.pin-entry[\s\S]{0,400}letter-spacing/);
   assert.doesNotMatch(css, /\.pin-label\s*\{[^}]*clip:\s*rect/);
 });

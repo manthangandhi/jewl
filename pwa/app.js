@@ -734,8 +734,8 @@ function customerTone(balance) {
 function saleActions() {
   if (!state.customers.length) return '';
   return `<div class="sale-bar" role="group" aria-label="Customer actions">
-    <button type="button" class="sale-btn sold" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>Sold</strong><small>Customer bought</small></span></button>
-    <button type="button" class="sale-btn returned" data-action="modal" data-modal="return">${ic('returned')}<span><strong>Returned</strong><small>Customer gave back</small></span></button>
+    <button type="button" class="sale-btn sold" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>Sold</strong><small>They bought</small></span></button>
+    <button type="button" class="sale-btn returned" data-action="modal" data-modal="return">${ic('returned')}<span><strong>Returned</strong><small>They gave back</small></span></button>
   </div>`;
 }
 
