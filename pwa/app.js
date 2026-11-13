@@ -1,7 +1,7 @@
 import { monthlyTrend, salesMix, topCustomers, duesAgeing, quietCustomers, repeatStats, returnRates, changePct, PERIODS, periodRange, monthsForRange, filterSales } from './insights.js';
 import { summarizeLedger, buildPassbook, rangeForPreset, reportForRange, reportCsv, puritiesForType } from './ledger-math.js';
 import {
-  SALE, RETURN, PAYMENT, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
+  SALE, RETURN, PAYMENT, EXCHANGE, computeBill, billBreakupText, seedCategories, categoriesForType, summarizeCustomers, buildCustomerPassbook,
   categoryTotals, salesPeriodTotals, validateSale, validatePayment, removeCustomerData
 } from './customer-math.js';
 import { LABEL, balanceName } from './labels.js';
@@ -124,6 +124,7 @@ const initials = (name) => {
 };
 function ic(name) {
   const paths = {
+    scale: '<path d="M12 4v16M6 20h12M5 8h14"/><path d="M5 8l-3 6a3 3 0 0 0 6 0zM19 8l-3 6a3 3 0 0 0 6 0z"/>',
     rupee: '<path d="M7 5h10M7 9h10M7 5c5 0 7 2 7 4s-2 4-7 4l7 6"/>',
     out: '<path d="M5 19L19 5M9 5h10v10"/>',
     in: '<path d="M19 5L5 19M15 19H5V9"/>',
@@ -1068,10 +1069,11 @@ function customerTone(balance) {
 function saleActions() {
   if (!state.customers.length) return '';
   const C = LABEL.customer;
-  return `<div class="action-bar three" role="group" aria-label="Customer entries">
+  return `<div class="action-bar four" role="group" aria-label="Customer entries">
     <button type="button" class="act primary" data-action="modal" data-modal="sale">${ic('sold')}<span><strong>${C.sale}</strong><small>They bought</small></span></button>
     <button type="button" class="act return" data-action="modal" data-modal="return">${ic('returned')}<span><strong>${C.return}</strong><small>They gave back</small></span></button>
     <button type="button" class="act" data-action="modal" data-modal="custpay">${ic('rupee')}<span><strong>${C.payment}</strong><small>They paid us</small></span></button>
+    <button type="button" class="act" data-action="modal" data-modal="exchange">${ic('scale')}<span><strong>${C.exchange}</strong><small>They gave old gold</small></span></button>
   </div>`;
 }
 
@@ -1131,7 +1133,7 @@ function customersHome() {
         </div>
         <ol class="passbook-list tight">${recent.map((row) => `
           <li class="cell clickable" data-edit="sale" data-id="${esc(row.id)}">
-            <span class="cell-main"><strong>${row.kind === PAYMENT ? LABEL.customer.payment : (row.kind === RETURN ? LABEL.customer.return : LABEL.customer.sale)}${row.category ? `, ${esc(row.category)}` : ''}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))}, ${fmtDate(row.date)}</small></span>
+            <span class="cell-main"><strong>${row.kind === PAYMENT ? LABEL.customer.payment : (row.kind === RETURN ? LABEL.customer.return : row.kind === EXCHANGE ? LABEL.customer.exchange : LABEL.customer.sale)}${row.category ? `, ${esc(row.category)}` : ''}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))}, ${fmtDate(row.date)}</small></span>
             <span class="cell-trail"><b>${money(row.amountInr)}</b></span>
           </li>`).join('') || '<li class="empty-in">No sales this month</li>'}</ol>
       </aside>
@@ -1174,11 +1176,11 @@ function customerPassbook() {
           <time class="pass-date">${esc(fmtDate(line.date))}</time>
           <span class="cell-main">
             <strong>${line.label}${line.hasPhoto ? ` <span class="photo-flag" title="Has photo">${ic('camera')}</span>` : ''}</strong>
-            <small>${esc([line.detail, line.note].filter(Boolean).join(', '))}</small>
+            <small>${esc([line.detail, billBreakupText(line.raw), line.note].filter(Boolean).join(', '))}</small>
           </span>
           <span class="cell-trail">
             <b class="${line.kind === 'return' ? 'owe' : 'collect'}">${money(line.amountInr)}</b>
-            <em class="hisab"><span>Paid ${money(line.paidInr)}</span><span>Balance ${money(line.runningInr)}</span></em>
+            <em class="hisab"><span>${line.kind === 'exchange' ? 'Credit' : `Paid ${money(line.paidInr)}`}</span><span>Balance ${money(line.runningInr)}</span></em>
           </span>
         </li>`).join('')}</ol>` : `<div class="empty-in">${ic('sold')}<span>Nothing yet. Tap Sale when this customer buys.</span></div>`}
     </section>
@@ -2073,32 +2075,52 @@ function resetPhotoState() {
 function saleModal(modalKind) {
   const e = state.editing || {};
   const isEdit = Boolean(e.id);
-  const kind = e.kind || (modalKind === 'return' ? RETURN : SALE);
+  const kind = e.kind || (modalKind === 'return' ? RETURN : modalKind === 'exchange' ? EXCHANGE : SALE);
   const isReturn = kind === RETURN;
+  const isExchange = kind === EXCHANGE;
   const locked = Boolean(state.customerId) && !isEdit;
   const metalType = e.metalType || 'GOLD';
   const amountDefault = e.amountInr ?? '';
   const paidDefault = isEdit ? (e.paidInr ?? '') : '';
   const customerId = e.customerId || state.customerId || '';
-  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${isReturn ? 'Customer return' : 'Customer sale'}">
-    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isReturn ? 'Return from customer' : 'Sale to customer')}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${isExchange ? 'Old gold from customer' : isReturn ? 'Customer return' : 'Customer sale'}">
+    <div class="section-head"><h2>${isEdit ? 'Edit entry' : (isExchange ? 'Old gold from customer' : isReturn ? 'Return from customer' : 'Sale to customer')}</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
     <form id="data-form" data-kind="sale">
       ${locked ? `<input type="hidden" name="customerId" value="${esc(state.customerId)}">` : `<label>Customer<select name="customerId" required><option value="">Choose customer…</option>${state.customers.map((c) => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(customerLabel(c))}</option>`).join('')}</select></label>`}
       ${isEdit ? `<label>Type<select name="kind">
-        <option value="SALE" ${!isReturn ? 'selected' : ''}>Sale</option>
+        <option value="SALE" ${kind === SALE ? 'selected' : ''}>Sale</option>
         <option value="RETURN" ${isReturn ? 'selected' : ''}>Return</option>
+        <option value="EXCHANGE" ${isExchange ? 'selected' : ''}>Old gold</option>
       </select></label>` : `<input type="hidden" name="kind" value="${kind}">`}
       <div class="field-row">
         <label>Metal<select name="metalType">${metalTypeOptions(metalType)}</select></label>
         <label>Purity<select name="purity">${purityOptions(metalType, e.purity || (metalType === 'SILVER' ? '925' : metalType === 'PLATINUM' ? '950' : '22K'))}</select></label>
       </div>
       <label>Item<select name="category" required>${categoryOptions(metalType, e.category || '')}</select></label>
-      <label>Weight (grams)<input name="weightGrams" type="number" min="0.001" step="0.001" required inputmode="decimal" placeholder="e.g. 12.5" value="${esc(e.weightGrams || '')}"></label>
+      <label>${isExchange ? 'Weight handed in (grams)' : 'Weight (grams)'}<input name="weightGrams" type="number" min="0.001" step="0.001" required inputmode="decimal" placeholder="e.g. 12.5" value="${esc(e.weightGrams || '')}"></label>
       <p class="rate-suggest" id="rate-suggest" hidden></p>
-      <label>${isReturn ? 'Value of returned item (₹)' : 'Bill amount (₹)'}<input name="amountInr" type="number" min="0" step="0.01" required inputmode="decimal" placeholder="e.g. 85000" value="${esc(amountDefault)}"></label>
-      <label>${isReturn ? 'Refunded to customer (₹)' : 'Received from customer (₹)'}<input name="paidInr" type="number" min="0" step="0.01" inputmode="decimal" data-touched="${isEdit ? '1' : ''}" placeholder="Same as bill if paid in full" value="${esc(paidDefault)}"></label>
+      ${isReturn || isExchange ? '' : `<details class="breakup" ${(e.ratePerGram || e.makingInr || e.stoneInr || e.discountInr || e.gstInr || e.huid) ? 'open' : ''}>
+        <summary>Bill breakup (optional)</summary>
+        <p class="hint">Fill what you charge and the bill amount adds up by itself.</p>
+        <div class="field-row">
+          <label>Rate per gram (₹)<input name="ratePerGram" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(e.ratePerGram || '')}"></label>
+          <label>Making charge (₹)<input name="makingInr" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(e.makingInr || '')}"></label>
+        </div>
+        <div class="field-row">
+          <label>Stone / extras (₹)<input name="stoneInr" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(e.stoneInr || '')}"></label>
+          <label>Discount (₹)<input name="discountInr" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(e.discountInr || '')}"></label>
+        </div>
+        <div class="field-row">
+          <label>GST (%)<input name="gstPct" type="number" min="0" max="28" step="0.01" inputmode="decimal" value="${esc(e.gstInr && e.amountInr > e.gstInr ? Math.round((e.gstInr / (e.amountInr - e.gstInr)) * 10000) / 100 : (isEdit ? '' : '3'))}"></label>
+          <label>HUID<input name="huid" autocomplete="off" maxlength="12" value="${esc(e.huid || '')}" placeholder="6 letters/digits"></label>
+        </div>
+        <label>Net weight (grams, after stone)<input name="netWeightGrams" type="number" min="0" step="0.001" inputmode="decimal" value="${esc(e.netWeightGrams || '')}"></label>
+        <p class="bill-sum" id="bill-sum" aria-live="polite"></p>
+      </details>`}
+      <label>${isExchange ? 'Value given for old gold (₹)' : isReturn ? 'Value of returned item (₹)' : 'Bill amount (₹)'}<input name="amountInr" type="number" min="0" step="0.01" required inputmode="decimal" placeholder="e.g. 85000" value="${esc(amountDefault)}"></label>
+      ${isExchange ? '<p class="hint">This is credit for the customer. It reduces what they owe and counts the gold as received.</p>' : `<label>${isReturn ? 'Refunded to customer (₹)' : 'Received from customer (₹)'}<input name="paidInr" type="number" min="0" step="0.01" inputmode="decimal" data-touched="${isEdit ? '1' : ''}" placeholder="Same as bill if paid in full" value="${esc(paidDefault)}"></label>`}
       <div class="photo-box">
-        <div class="photo-title">Photo of the item</div>
+        <div class="photo-title">${isExchange ? 'Photo of the old item' : 'Photo of the item'}</div>
         <div id="photo-preview" class="photo-preview">${photoPreviewHtml()}</div>
         <div class="photo-actions">
           <label class="btn btn-soft file-btn">${ic('camera')}<span>Take photo</span><input type="file" id="photo-camera" class="sr-only" accept="image/*" capture="environment"></label>
@@ -2230,7 +2252,7 @@ function modal() {
   if (kind === 'updateSheet') return updateSheetModal();
   if (kind === 'install') return installModal();
   if (kind === 'customer') return customerModal();
-  if (kind === 'sale' || kind === 'return') return state.editing?.kind === PAYMENT ? custPayModal() : saleModal(kind);
+  if (kind === 'sale' || kind === 'return' || kind === 'exchange') return state.editing?.kind === PAYMENT ? custPayModal() : saleModal(kind);
   if (kind === 'custpay') return custPayModal();
   if (kind === 'interaction') return interactionModal();
   if (kind === 'category') return categoryModal();
@@ -2618,6 +2640,25 @@ function bind() {
   updateRateSuggest();
   bindRateHandlers();
   if (state.view === 'today' && state.unlocked && !state.ratesLoading && (!state.rates || ratesAreStale(state.rates.fetchedAt))) loadRates();
+  const saleForm = root.querySelector('form[data-kind="sale"]');
+  const billSum = root.querySelector('#bill-sum');
+  if (saleForm && billSum) {
+    const names = ['weightGrams', 'ratePerGram', 'makingInr', 'stoneInr', 'discountInr', 'gstPct'];
+    const recalc = (fromUser) => {
+      const v = Object.fromEntries(names.map((n) => [n, saleForm.elements[n]?.value]));
+      if (!Number(v.ratePerGram) && !Number(v.makingInr) && !Number(v.stoneInr)) { billSum.textContent = ''; return; }
+      const b = computeBill(v);
+      billSum.textContent = `Metal ${money(b.metal)} + making ${money(b.making)} + stone ${money(b.stone)} − discount ${money(b.discount)} + GST ${money(b.gst)} = ${money(b.total)}`;
+      if (fromUser) {
+        const amt = saleForm.elements.amountInr;
+        const paid = saleForm.elements.paidInr;
+        amt.value = String(b.total);
+        if (paid && !paid.dataset.touched) paid.value = String(b.total);
+      }
+    };
+    for (const n of names) saleForm.elements[n]?.addEventListener('input', () => recalc(true));
+    recalc(false);
+  }
   const amountInput = root.querySelector('form[data-kind="sale"] input[name="amountInr"]');
   const paidInput = root.querySelector('form[data-kind="sale"] input[name="paidInr"]');
   if (amountInput && paidInput) {
@@ -2917,8 +2958,14 @@ async function submitForm(event) {
         photoId = '';
         photoUrl = '';
       }
+      const saleKind = data.kind === RETURN ? RETURN : data.kind === EXCHANGE ? EXCHANGE : SALE;
+      const breakup = saleKind === SALE ? {
+        ratePerGram: data.ratePerGram || '', makingInr: data.makingInr || '', stoneInr: data.stoneInr || '',
+        discountInr: data.discountInr || '', huid: String(data.huid || '').trim().toUpperCase(), netWeightGrams: data.netWeightGrams || '',
+        gstInr: data.gstPct && Number(data.ratePerGram) ? computeBill({ weightGrams: v.grams, ratePerGram: data.ratePerGram, makingInr: data.makingInr, stoneInr: data.stoneInr, discountInr: data.discountInr, gstPct: data.gstPct }).gst || '' : ''
+      } : {};
       state.sales = upsertById(state.sales, stamp({
-        ...old, id, customerId: data.customerId, kind: data.kind === RETURN ? RETURN : SALE,
+        ...old, ...breakup, id, customerId: data.customerId, kind: saleKind,
         category: String(data.category).trim(), metalType: String(data.metalType).toUpperCase(), purity: data.purity,
         weightGrams: v.grams, amountInr: v.amount, paidInr: v.paid, date: data.date, note: data.note || '',
         photoId, photoUrl

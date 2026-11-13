@@ -44,7 +44,7 @@ test('a board rate typed on an earlier day does not hide the live price', () => 
   assert.equal(effectiveRate({ master: row(old), snapshot }, 'GOLD', '24K').source, 'live');
   assert.equal(boardRateIsToday({}), false);
   assert.equal(boardRateIsToday({ updatedAt: 'garbage' }), false);
-  assert.equal(boardRateIsToday({ updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19) }), true);
+  assert.equal(boardRateIsToday({ updatedAt: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().replace('T', ' ').slice(0, 19) }), true);
 });
 
 test('license: the trial end date counts even when the status says ACTIVE', () => {

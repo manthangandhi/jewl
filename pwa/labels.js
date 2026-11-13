@@ -19,7 +19,8 @@ export const LABEL = {
   customer: {
     sale: 'Sale',
     return: 'Return',
-    payment: 'Payment'
+    payment: 'Payment',
+    exchange: 'Old gold'
   }
 };
 

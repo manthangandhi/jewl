@@ -14,7 +14,7 @@ export const HEADERS = {
   Khata: ['supplierName', 'status', 'moneyDirection', 'moneyInr', 'gold24k', 'gold22k', 'gold18k', 'gold14k', 'silver999', 'silver925', 'weOweInr', 'theyOweInr', 'updatedAt', 'supplierId'],
   MetalMaster: ['metalType', 'purity', 'rateInrPerGram', 'status', 'createdAt', 'updatedAt', 'id'],
   Customers: ['name', 'phone', 'city', 'notes', 'status', 'createdAt', 'updatedAt', 'id', 'email', 'address', 'birthday', 'anniversary', 'tag', 'followUpDate', 'followUpNote'],
-  Sales: ['date', 'customerName', 'kind', 'category', 'metalType', 'purity', 'weightGrams', 'amountInr', 'paidInr', 'note', 'photoId', 'photoUrl', 'createdAt', 'updatedAt', 'customerId', 'id'],
+  Sales: ['date', 'customerName', 'kind', 'category', 'metalType', 'purity', 'weightGrams', 'amountInr', 'paidInr', 'note', 'photoId', 'photoUrl', 'createdAt', 'updatedAt', 'customerId', 'id', 'ratePerGram', 'makingInr', 'stoneInr', 'discountInr', 'gstInr', 'huid', 'netWeightGrams'],
   Categories: ['metalType', 'category', 'status', 'createdAt', 'updatedAt', 'id'],
   CustomerKhata: ['customerName', 'phone', 'balanceDirection', 'balanceInr', 'metalSummary', 'lastActivity', 'updatedAt', 'customerId'],
   Interactions: ['date', 'partyType', 'partyName', 'kind', 'text', 'createdAt', 'updatedAt', 'partyId', 'id']

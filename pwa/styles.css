@@ -512,6 +512,10 @@ button.cell:hover, .cell.clickable:hover, .master-row:hover { background: color-
   .action-bar.three .act { flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--space-2xs); padding: var(--space-sm); }
   .action-bar.three .act small { display: none; }
 }
+
+.breakup { border: var(--rule-hair) solid var(--color-rule); padding: var(--space-sm) var(--space-md); display: grid; gap: var(--space-sm); background: var(--color-card); }
+.breakup > summary { cursor: pointer; font-weight: 500; min-height: 44px; display: flex; align-items: center; }
+.bill-sum { margin: 0; font-size: var(--text-sm); color: var(--color-muted); font-variant-numeric: tabular-nums; }
 @media (min-width: 768px) { .action-bar.four { grid-template-columns: repeat(4, 1fr); } }
 
 /* ================= people: contact, follow-up, notes ================= */

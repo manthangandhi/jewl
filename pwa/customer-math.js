@@ -5,6 +5,8 @@ import { LABEL, balanceName } from './labels.js';
 export const SALE = 'SALE';
 export const RETURN = 'RETURN';
 export const PAYMENT = 'PAYMENT';
+/** Old gold or silver the customer hands in against a bill. It is credit to them, in rupees and in metal. */
+export const EXCHANGE = 'EXCHANGE';
 
 const DEFAULT_CATEGORIES = {
   GOLD: ['Chain', 'Mangalsutra', 'Ring', 'Earrings', 'Bangles', 'Bracelet', 'Necklace', 'Pendant', 'Nose pin', 'Coin', 'Bar', 'Other'],
@@ -44,9 +46,9 @@ export function categoriesForType(categories, metalType) {
 
 const num = (v) => Number(v || 0);
 const titleCase = (v) => String(v || '').toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
-const sign = (row) => (row.kind === RETURN ? -1 : 1);
+const sign = (row) => (row.kind === RETURN || row.kind === EXCHANGE ? -1 : 1);
 /** How one entry moves the balance: positive means the customer owes us more. */
-const delta = (row) => (row.kind === PAYMENT ? -num(row.amountInr) : sign(row) * (num(row.amountInr) - num(row.paidInr)));
+const delta = (row) => (row.kind === PAYMENT || row.kind === EXCHANGE ? -num(row.amountInr) : sign(row) * (num(row.amountInr) - num(row.paidInr)));
 
 /** Positive = the customer owes the shop. Negative = the shop owes the customer. */
 export function customerBalance(sales, customerId) {
@@ -108,11 +110,11 @@ export function buildCustomerPassbook(customerId, sales) {
     const isPayment = row.kind === PAYMENT;
     return {
       id: row.id,
-      kind: isPayment ? 'payment' : row.kind === RETURN ? 'return' : 'sale',
-      label: isPayment ? LABEL.customer.payment : row.kind === RETURN ? LABEL.customer.return : LABEL.customer.sale,
+      kind: isPayment ? 'payment' : row.kind === RETURN ? 'return' : row.kind === EXCHANGE ? 'exchange' : 'sale',
+      label: isPayment ? LABEL.customer.payment : row.kind === RETURN ? LABEL.customer.return : row.kind === EXCHANGE ? LABEL.customer.exchange : LABEL.customer.sale,
       date: row.date,
       category: row.category || '',
-      detail: [row.category, `${titleCase(row.metalType)} ${row.purity || ''}`.trim(), grams ? `${grams} g` : '']
+      detail: [row.category, `${titleCase(row.metalType)} ${row.purity || ''}`.trim(), grams ? `${grams} g` : '', row.huid ? `HUID ${row.huid}` : '']
         .filter(Boolean).join(', '),
       note: row.note || '',
       amountInr: num(row.amountInr),
@@ -138,7 +140,7 @@ function inRange(row, from, to) {
 export function categoryTotals(sales, { from = '', to = '' } = {}) {
   const map = {};
   for (const row of sales || []) {
-    if (!inRange(row, from, to) || row.kind === PAYMENT) continue;
+    if (!inRange(row, from, to) || row.kind === PAYMENT || row.kind === EXCHANGE) continue;
     const metalType = String(row.metalType || '').toUpperCase() || 'OTHER';
     const category = String(row.category || '').trim() || 'Uncategorised';
     const key = `${metalType}|${category}`;
@@ -163,7 +165,7 @@ export function categoryTotals(sales, { from = '', to = '' } = {}) {
 
 export function salesPeriodTotals(sales, range = {}) {
   const rows = (sales || []).filter((row) => inRange(row, range.from, range.to));
-  const sum = (kind, field) => rows.filter((row) => (kind === RETURN ? row.kind === RETURN : kind === PAYMENT ? row.kind === PAYMENT : row.kind !== RETURN && row.kind !== PAYMENT))
+  const sum = (kind, field) => rows.filter((row) => (kind === RETURN ? row.kind === RETURN : kind === PAYMENT ? row.kind === PAYMENT : row.kind !== RETURN && row.kind !== PAYMENT && row.kind !== EXCHANGE))
     .reduce((n, row) => n + num(row[field]), 0);
   return {
     soldInr: sum(SALE, 'amountInr'),
@@ -192,10 +194,38 @@ export function validateSale(data = {}) {
   if (!(grams > 0)) throw new Error('Enter the weight in grams');
   const amount = num(data.amountInr);
   if (!(amount >= 0)) throw new Error('Enter the amount in rupees');
+  if (data.kind === EXCHANGE) return { grams, amount, paid: 0 };
   const paid = data.paidInr === '' || data.paidInr == null ? amount : num(data.paidInr);
   if (paid < 0) throw new Error('Paid amount cannot be below zero');
   if (paid > amount) throw new Error('Paid amount is more than the bill amount');
   return { grams, amount, paid };
+}
+
+const r2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * The bill, line by line: metal at the day's rate, making charge, stones, discount, then GST on what is left.
+ * Returns blank-safe numbers; `total` is what the customer is asked to pay.
+ */
+export function computeBill({ weightGrams, ratePerGram, makingInr, stoneInr, discountInr, gstPct } = {}) {
+  const metal = r2(num(weightGrams) * num(ratePerGram));
+  const making = r2(num(makingInr));
+  const stone = r2(num(stoneInr));
+  const discount = r2(num(discountInr));
+  const taxable = Math.max(0, r2(metal + making + stone - discount));
+  const gst = r2(taxable * num(gstPct) / 100);
+  return { metal, making, stone, discount, taxable, gst, total: r2(taxable + gst) };
+}
+
+/** What a sale row says about its own price, for the passbook line. Empty when no breakup was entered. */
+export function billBreakupText(row = {}) {
+  const parts = [];
+  if (num(row.ratePerGram)) parts.push(`rate ₹${num(row.ratePerGram).toLocaleString('en-IN')}/g`);
+  if (num(row.makingInr)) parts.push(`making ₹${num(row.makingInr).toLocaleString('en-IN')}`);
+  if (num(row.stoneInr)) parts.push(`stone ₹${num(row.stoneInr).toLocaleString('en-IN')}`);
+  if (num(row.discountInr)) parts.push(`discount ₹${num(row.discountInr).toLocaleString('en-IN')}`);
+  if (num(row.gstInr)) parts.push(`GST ₹${num(row.gstInr).toLocaleString('en-IN')}`);
+  return parts.join(', ');
 }
 
 export function removeCustomerData(ledger, customerId) {

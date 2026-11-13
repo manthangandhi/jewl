@@ -1,5 +1,5 @@
 /** Numbers a shop owner can act on: trends, who buys, who owes, what sells. Pure functions, no screen code. */
-import { SALE, RETURN, PAYMENT, customerBalance } from './customer-math.js';
+import { SALE, RETURN, PAYMENT, EXCHANGE, customerBalance } from './customer-math.js';
 
 const num = (v) => Number(v || 0);
 const day = (v) => String(v || '').slice(0, 10);
@@ -22,6 +22,7 @@ export function monthlyTrend({ sales = [], money = [] }, now = new Date(), count
   for (const row of sales) {
     const m = at[day(row.date).slice(0, 7)];
     if (!m) continue;
+    if (row.kind === EXCHANGE) continue;
     if (row.kind === PAYMENT) m.collected += num(row.amountInr);
     else if (row.kind === RETURN) m.returned += num(row.amountInr);
     else { m.sold += num(row.amountInr); m.collected += num(row.paidInr); }
@@ -38,7 +39,7 @@ export function salesMix(sales, { from = '', to = '' } = {}) {
   const by = {};
   let total = 0;
   for (const row of sales) {
-    if (row.kind === PAYMENT || row.kind === RETURN) continue;
+    if (row.kind === PAYMENT || row.kind === RETURN || row.kind === EXCHANGE) continue;
     const d = day(row.date);
     if ((from && d < from) || (to && d > to)) continue;
     const type = String(row.metalType || 'OTHER').toUpperCase();
@@ -54,7 +55,7 @@ export function topCustomers(customers, sales, { from = '', limit = 5 } = {}) {
   const name = Object.fromEntries((customers || []).map((c) => [c.id, c.name]));
   const by = {};
   for (const row of sales) {
-    if (row.kind === PAYMENT || (from && day(row.date) < from)) continue;
+    if (row.kind === PAYMENT || row.kind === EXCHANGE || (from && day(row.date) < from)) continue;
     const e = (by[row.customerId] ||= { id: row.customerId, name: name[row.customerId] || 'Customer', soldInr: 0, returnedInr: 0, visits: 0 });
     if (row.kind === RETURN) e.returnedInr += num(row.amountInr);
     else { e.soldInr += num(row.amountInr); e.visits += 1; }
@@ -79,7 +80,7 @@ export function duesAgeing(customers, sales, now = new Date()) {
     let credit = 0;
     const debts = [];
     for (const r of mine) {
-      if (r.kind === PAYMENT) credit += num(r.amountInr);
+      if (r.kind === PAYMENT || r.kind === EXCHANGE) credit += num(r.amountInr);
       else if (r.kind === RETURN) credit += Math.max(0, num(r.amountInr) - num(r.paidInr));
       else if (num(r.amountInr) - num(r.paidInr) > 0) debts.push({ date: day(r.date), left: num(r.amountInr) - num(r.paidInr) });
     }
@@ -117,7 +118,7 @@ export function repeatStats(sales) {
 export function returnRates(sales, limit = 5) {
   const by = {};
   for (const r of sales || []) {
-    if (r.kind === PAYMENT) continue;
+    if (r.kind === PAYMENT || r.kind === EXCHANGE) continue;
     const key = String(r.category || 'Uncategorised');
     const e = (by[key] ||= { category: key, sold: 0, returned: 0 });
     if (r.kind === RETURN) e.returned += num(r.amountInr); else e.sold += num(r.amountInr);

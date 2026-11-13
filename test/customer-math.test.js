@@ -124,3 +124,29 @@ test('demo customers can be loaded and removed by id, without touching real cust
   assert.deepEqual(clean.sales.map((s) => s.id), ['s-real']);
   assert.equal(isDemoLedgerRow({ customerId: 'demo-c-sunil' }), true);
 });
+
+import { EXCHANGE as EX, computeBill, billBreakupText, buildCustomerPassbook as pb, customerBalance as cb, customerMetalNet as cmn, validateSale as vs } from '../pwa/customer-math.js';
+
+test('bill breakup adds up: metal + making + stone - discount, then GST', () => {
+  const b = computeBill({ weightGrams: 10, ratePerGram: 7000, makingInr: 5000, stoneInr: 1000, discountInr: 1000, gstPct: 3 });
+  assert.equal(b.metal, 70000);
+  assert.equal(b.taxable, 75000);
+  assert.equal(b.gst, 2250);
+  assert.equal(b.total, 77250);
+  assert.equal(computeBill({}).total, 0);
+  assert.match(billBreakupText({ ratePerGram: 7000, makingInr: 5000, gstInr: 2250 }), /rate ₹7,000\/g, making ₹5,000, GST ₹2,250/);
+  assert.equal(billBreakupText({}), '');
+});
+
+test('old gold handed in is credit in rupees and metal, and is not a sale', () => {
+  const rows = [
+    { id: 's1', customerId: 'c1', kind: 'SALE', metalType: 'GOLD', purity: '22K', weightGrams: 20, amountInr: 140000, paidInr: 40000, date: '2026-11-01' },
+    { id: 'e1', customerId: 'c1', kind: EX, metalType: 'GOLD', purity: '22K', weightGrams: 8, amountInr: 50000, paidInr: 0, date: '2026-11-01', huid: 'AB12CD' }
+  ];
+  assert.equal(cb(rows, 'c1'), 50000);
+  assert.deepEqual(cmn(rows, 'c1'), { 'GOLD:22K': 12 });
+  const line = pb('c1', rows).find((l) => l.id === 'e1');
+  assert.equal(line.kind, 'exchange');
+  assert.equal(line.label, 'Old gold');
+  assert.deepEqual(vs({ customerId: 'c1', kind: EX, metalType: 'GOLD', purity: '22K', category: 'Other', weightGrams: 8, amountInr: 50000 }), { grams: 8, amount: 50000, paid: 0 });
+});
