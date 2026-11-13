@@ -40,6 +40,7 @@ export function categoriesForType(categories, metalType) {
 }
 
 const num = (v) => Number(v || 0);
+const titleCase = (v) => String(v || '').toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
 const sign = (row) => (row.kind === RETURN ? -1 : 1);
 
 /** Positive = the customer owes the shop. Negative = the shop owes the customer. */
@@ -106,8 +107,8 @@ export function buildCustomerPassbook(customerId, sales) {
       label: row.kind === RETURN ? 'Returned' : 'Sold',
       date: row.date,
       category: row.category || '',
-      detail: [row.category, `${String(row.metalType || '').toUpperCase()} ${row.purity || ''}`.trim(), grams ? `${grams} g` : '']
-        .filter(Boolean).join(' · '),
+      detail: [row.category, `${titleCase(row.metalType)} ${row.purity || ''}`.trim(), grams ? `${grams} g` : '']
+        .filter(Boolean).join(', '),
       note: row.note || '',
       amountInr: num(row.amountInr),
       paidInr: num(row.paidInr),

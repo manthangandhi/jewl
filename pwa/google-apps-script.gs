@@ -223,7 +223,39 @@ function demoLedger_() {
     return { id: id, supplierId: supplierId, supplierName: names[supplierId] || "", moneyAmountInr: cash, metalType: metalType || "", purity: purity || "", metalGrams: grams || 0, note: note, date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
   const now = t(0);
+  function customer(id, name, phone, city, ago) {
+    const s = t(ago);
+    return { id: id, name: name, phone: phone, city: city, notes: "Demo customer", status: "ACTIVE", createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+  const custNames = {
+    "demo-c-anita": "Anita Deshmukh",
+    "demo-c-rakesh": "Rakesh Bhatia",
+    "demo-c-meena": "Meena Kapoor",
+    "demo-c-sunil": "Sunil Verma"
+  };
+  function sale(id, customerId, kind, category, metalType, purity, grams, amount, paid, note, ago) {
+    const s = t(ago);
+    return { id: id, customerId: customerId, customerName: custNames[customerId] || "", kind: kind, category: category, metalType: metalType, purity: purity, weightGrams: grams, amountInr: amount, paidInr: paid, note: note, photoId: "", photoUrl: "", date: s.date, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
   return {
+    customers: [
+      customer("demo-c-anita", custNames["demo-c-anita"], "98230 11001", "Pune", 80),
+      customer("demo-c-rakesh", custNames["demo-c-rakesh"], "98190 22002", "Mumbai", 70),
+      customer("demo-c-meena", custNames["demo-c-meena"], "99201 33003", "Thane", 55),
+      customer("demo-c-sunil", custNames["demo-c-sunil"], "97300 44004", "Nashik", 40)
+    ],
+    sales: [
+      sale("demo-s-01", "demo-c-anita", "SALE", "Mangalsutra", "GOLD", "22K", 18.5, 138000, 100000, "Wedding order, balance later", 60),
+      sale("demo-s-02", "demo-c-anita", "SALE", "Earrings", "GOLD", "22K", 6.2, 46000, 46000, "", 41),
+      sale("demo-s-03", "demo-c-anita", "RETURN", "Earrings", "GOLD", "22K", 6.2, 44000, 44000, "Did not suit, refunded", 38),
+      sale("demo-s-04", "demo-c-rakesh", "SALE", "Chain", "GOLD", "22K", 24, 178000, 178000, "", 52),
+      sale("demo-s-05", "demo-c-rakesh", "SALE", "Ring", "GOLD", "18K", 7.8, 44000, 30000, "", 19),
+      sale("demo-s-06", "demo-c-meena", "SALE", "Payal", "SILVER", "925", 210, 19500, 19500, "", 33),
+      sale("demo-s-07", "demo-c-meena", "SALE", "Pooja items", "SILVER", "999", 150, 17400, 10000, "", 12),
+      sale("demo-s-08", "demo-c-meena", "RETURN", "Payal", "SILVER", "925", 40, 3700, 0, "Returned one payal", 5),
+      sale("demo-s-09", "demo-c-sunil", "SALE", "Bangles", "GOLD", "22K", 32, 236000, 236000, "", 27),
+      sale("demo-s-10", "demo-c-sunil", "SALE", "Coin", "GOLD", "24K", 10, 79500, 79500, "", 6)
+    ],
     shopName: "Mehta Jewellers",
     suppliers: [
       party("demo-ramesh", "Ramesh Karigar", "98200 11122", "Mumbai", "22K jobwork — Zaveri Bazaar", 90),
@@ -298,8 +330,9 @@ function isDemoRow_(row) {
   if (!row) return false;
   const id = String(row.id || "").trim();
   const supplierId = String(row.supplierId || "").trim();
+  const customerId = String(row.customerId || "").trim();
   const name = String(row.name || row.supplierName || "").trim();
-  if (isDemoId_(id) || isDemoId_(supplierId)) return true;
+  if (isDemoId_(id) || isDemoId_(supplierId) || isDemoId_(customerId)) return true;
   if (DEMO_PARTY_NAMES.indexOf(name) !== -1 || DEMO_PARTY_NAMES.indexOf(id) !== -1) return true;
   return false;
 }
@@ -328,6 +361,11 @@ function seedDemoLedger_(opt) {
   writeObjectsAsRows_("Money", moneyRows);
   writeObjectsAsRows_("Metal", metalRows);
   writeObjectsAsRows_("Settlements", settleRows);
+  const customerRows = dropDemoRows_(readRowsAsObjects_("Customers")).concat(demo.customers);
+  const salesRows = dropDemoRows_(readRowsAsObjects_("Sales")).concat(demo.sales);
+  writeObjectsAsRows_("Customers", customerRows);
+  writeObjectsAsRows_("Sales", salesRows);
+  writeObjectsAsRows_("CustomerKhata", buildCustomerKhataRows_(customerRows, salesRows));
   const master = readRowsAsObjects_("MetalMaster");
   const byId = {};
   master.concat(demo.metalMaster).forEach(function (row) { if (row.id) byId[row.id] = row; });
@@ -346,6 +384,11 @@ function clearDemoLedger_() {
   writeObjectsAsRows_("Metal", metalRows);
   writeObjectsAsRows_("Settlements", settleRows);
   writeObjectsAsRows_("Khata", buildKhataRows_(suppliers, moneyRows, metalRows, settleRows));
+  const customerRows = dropDemoRows_(readRowsAsObjects_("Customers"));
+  const salesRows = dropDemoRows_(readRowsAsObjects_("Sales"));
+  writeObjectsAsRows_("Customers", customerRows);
+  writeObjectsAsRows_("Sales", salesRows);
+  writeObjectsAsRows_("CustomerKhata", buildCustomerKhataRows_(customerRows, salesRows));
   return { ok: true, cleared: true, spreadsheetUrl: spreadsheetUrl_(), version: SCRIPT_VERSION };
 }
 
@@ -500,6 +543,38 @@ function buildKhataRows_(suppliers, money, metal, settlements) {
       theyOweInr: Math.max(0, -payable),
       updatedAt: now,
       supplierId: supplier.id
+    };
+  });
+}
+
+function buildCustomerKhataRows_(customers, sales) {
+  const now = formatDateTime_(new Date());
+  return (customers || []).map(function (customer) {
+    let balance = 0;
+    let last = "";
+    const metal = {};
+    (sales || []).forEach(function (row) {
+      if (row.customerId !== customer.id) return;
+      const sign = row.kind === "RETURN" ? -1 : 1;
+      balance += sign * (Number(row.amountInr || 0) - Number(row.paidInr || 0));
+      const d = String(row.date || "").slice(0, 10);
+      if (d > last) last = d;
+      if (row.metalType && row.purity) {
+        const key = String(row.metalType).toUpperCase() + " " + row.purity;
+        metal[key] = (metal[key] || 0) + sign * Number(row.weightGrams || 0);
+      }
+    });
+    const summary = Object.keys(metal).filter(function (k) { return Math.abs(metal[k]) > 1e-9; })
+      .map(function (k) { return k + " " + Math.round(metal[k] * 1000) / 1000 + " g"; }).join("; ");
+    return {
+      customerName: customer.name || "",
+      phone: customer.phone || "",
+      balanceDirection: balance > 0 ? "Unse lena" : balance < 0 ? "Hume dena" : "Square",
+      balanceInr: Math.abs(balance),
+      metalSummary: summary,
+      lastActivity: last,
+      updatedAt: now,
+      customerId: customer.id
     };
   });
 }

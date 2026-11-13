@@ -52,7 +52,7 @@ test('passbook lists newest first with a running balance', () => {
   assert.deepEqual(lines.map((l) => l.label), ['Returned', 'Sold', 'Sold']);
   assert.equal(lines[0].runningInr, 12000);
   assert.equal(lines.at(-1).runningInr, 50000);
-  assert.match(lines[2].detail, /Chain · GOLD 22K · 20 g/);
+  assert.match(lines[2].detail, /Chain, Gold 22K, 20 g/);
 });
 
 test('category totals show sold, returned and net weight by item', () => {
@@ -99,4 +99,28 @@ test('sales rows are written under their header, photo link included', () => {
   assert.equal(row[HEADERS.Sales.indexOf('photoId')], 'f1');
   assert.equal(row[HEADERS.Sales.indexOf('id')], 's1');
   assert.equal(buildCustomerBalanceRows([], []).length, 0);
+});
+
+test('demo customers can be loaded and removed by id, without touching real customers', async () => {
+  const fs = await import('node:fs');
+  const gs = fs.readFileSync(new URL('../pwa/google-apps-script.gs', import.meta.url), 'utf8');
+  assert.match(gs, /customers: \[\s*customer\("demo-c-anita"/);
+  assert.match(gs, /sale\("demo-s-01", "demo-c-anita"/);
+  assert.match(gs, /writeObjectsAsRows_\("Customers", customerRows\)/);
+  assert.match(gs, /isDemoId_\(customerId\)/);
+  assert.match(gs, /function buildCustomerKhataRows_/);
+  const clearFn = gs.match(/function clearDemoLedger_\(\) \{[\s\S]*?\n\}/)[0];
+  assert.match(clearFn, /dropDemoRows_\(readRowsAsObjects_\("Customers"\)\)/);
+  assert.match(clearFn, /dropDemoRows_\(readRowsAsObjects_\("Sales"\)\)/);
+
+  const { stripDemoLedger, isDemoLedgerRow } = await import('../pwa/sheet-model.js');
+  const ledger = {
+    suppliers: [], money: [], metal: [], settlements: [], metalMaster: [],
+    customers: [{ id: 'demo-c-anita', name: 'Anita Deshmukh' }, { id: 'c-real', name: 'Anita Shah' }],
+    sales: [{ id: 'demo-s-01', customerId: 'demo-c-anita' }, { id: 's-real', customerId: 'c-real' }]
+  };
+  const clean = stripDemoLedger(ledger);
+  assert.deepEqual(clean.customers.map((c) => c.id), ['c-real']);
+  assert.deepEqual(clean.sales.map((s) => s.id), ['s-real']);
+  assert.equal(isDemoLedgerRow({ customerId: 'demo-c-sunil' }), true);
 });

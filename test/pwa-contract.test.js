@@ -7,7 +7,7 @@ import { HEADERS } from '../pwa/sheet-model.js';
 const pwa = path.join(process.cwd(), 'pwa');
 
 test('PWA shell files exist for installable Sheets app', () => {
-  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'customer-math.js', 'photo.js', 'App.html', 'appsscript.json']) {
+  for (const file of ['index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'service-worker.js', 'icon.svg', 'apps-script-url.txt', 'google-apps-script.gs', 'karigar-licenses.gs', 'license-url.txt', 'sheets-client.js', 'shop-auth.js', 'session-cache.js', 'tour.js', 'party-khata-print.js', 'customer-math.js', 'photo.js', 'tokens.css', 'base.css', 'App.html', 'appsscript.json']) {
     assert.equal(fs.existsSync(path.join(pwa, file)), true, file);
   }
   const html = fs.readFileSync(path.join(pwa, 'index.html'), 'utf8');
@@ -107,9 +107,13 @@ test('PWA is party-first jewellery khata, not journal modules', () => {
   assert.match(css, /min-width: 1024px/);
   assert.doesNotMatch(css, /pin-pad/);
   assert.match(css, /desk-col/);
-  assert.match(css, /prefers-color-scheme:\s*dark/);
+  assert.match(css.split('\n').find((l) => l.trim()), /^\/\* Hallmark · shape: app screen/);
+  assert.match(css, /@import url\("\.\/tokens\.css"\)/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
-  assert.match(css, /min-height:\s*46px/);
+  assert.match(css, /--control:\s*46px/);
+  assert.match(css, /@media print/);
+  assert.match(css, /\.print-head/);
+  assert.doesNotMatch(css, /text-transform:\s*uppercase/);
   assert.match(css, /\.pin-entry[\s\S]{0,400}letter-spacing/);
   assert.doesNotMatch(css, /\.pin-label\s*\{[^}]*clip:\s*rect/);
 });

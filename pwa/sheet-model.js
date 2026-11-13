@@ -240,8 +240,9 @@ export function isDemoLedgerRow(row) {
   if (!row) return false;
   const id = String(row.id || '').trim();
   const supplierId = String(row.supplierId || '').trim();
+  const customerId = String(row.customerId || '').trim();
   const name = String(row.name || row.supplierName || '').trim();
-  if (id.startsWith('demo-') || supplierId.startsWith('demo-')) return true;
+  if (id.startsWith('demo-') || supplierId.startsWith('demo-') || customerId.startsWith('demo-')) return true;
   if (DEMO_PARTY_NAMES.includes(name) || DEMO_PARTY_NAMES.includes(id)) return true;
   return false;
 }
@@ -253,7 +254,7 @@ function dropDemoIdRows(list) {
 export function stripDemoLedger(ledger) {
   const current = ledger || emptyLedger();
   const next = { ...current };
-  for (const key of ['suppliers', 'money', 'metal', 'settlements']) {
+  for (const key of ['suppliers', 'money', 'metal', 'settlements', 'customers', 'sales']) {
     next[key] = dropDemoIdRows(current[key]);
   }
   next.metalMaster = current.metalMaster || [];

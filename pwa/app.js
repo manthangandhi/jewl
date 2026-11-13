@@ -6,7 +6,7 @@ import {
 import { compressImage, photoFileName } from './photo.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
-  dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName, assertPartyName
+  dedupePartyLedger, dealIsValid, splitDeal, partyDisplayName, assertPartyName, stripDemoLedger
 } from './sheet-model.js';
 import { normalizeAppsScriptUrl, googleHttpErrorMessage, verifyPin, parseSpreadsheetId, fillScriptConstants, explainLedgerError } from './sheets-client.js';
 import { toLedgerSnapshot, fromLedgerSnapshot, toSessionUnlock, fromSessionUnlock } from './session-cache.js';
@@ -153,10 +153,16 @@ function markDeleted(kind, id) {
   if (id && !list.includes(id)) state.deleted[kind] = list.concat(id);
 }
 
+const titleCase = (v) => String(v || '').toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
+const metalLabel = (key) => {
+  const [type, purity] = String(key).split(':');
+  return `${titleCase(type)} ${purity || ''}`.trim();
+};
+
 function metalPills(map) {
   const entries = Object.entries(map || {}).filter(([, v]) => Number(v) !== 0);
   if (!entries.length) return '';
-  return `<div class="metal-pills">${entries.map(([key, v]) => `<span class="pill">${esc(String(key).replace(':', ' '))} · ${grams(v)}</span>`).join('')}</div>`;
+  return `<div class="metal-pills">${entries.map(([key, v]) => `<span class="pill">${esc(metalLabel(key))}<b>${grams(v)}</b></span>`).join('')}</div>`;
 }
 
 function refreshSummary() {
@@ -395,7 +401,7 @@ async function refreshFromSheet() {
 }
 
 async function seedDemoIntoSheet() {
-  if (!confirm('Write a 3-month DEMO khata into this Google Sheet? Sample rows use demo- ids. Real parties stay. Do not use this on a live shop.')) return;
+  if (!confirm('Write a 3-month DEMO khata (suppliers and customers) into this Google Sheet? Sample rows use demo- ids. Your real entries stay. Do not use this on a live shop.')) return;
   state.syncing = true;
   render();
   try {
@@ -414,16 +420,22 @@ async function seedDemoIntoSheet() {
 }
 
 async function stripDemoFromSheet() {
-  if (!state.suppliers.some((row) => String(row.id || '').startsWith('demo-'))) {
+  if (![...state.suppliers, ...state.customers].some((row) => String(row.id || '').startsWith('demo-'))) {
     state.error = 'No sample khata on this Sheet.';
     render();
     return;
   }
-  if (!confirm('Remove the DEMO sample khata from this Google Sheet? Real parties stay.')) return;
+  if (!confirm('Remove the DEMO sample khata (suppliers and customers) from this Google Sheet? Your real suppliers and customers stay.')) return;
   state.syncing = true;
   render();
   try {
     await sheetsRequest({ action: 'clearDemo' });
+    // Drop the demo rows from this screen too, so a refresh cannot merge them back.
+    Object.assign(state, stripDemoLedger(state));
+    state.view = 'parties';
+    state.supplierId = null;
+    state.customerId = null;
+    refreshSummary();
     await refreshFromSheet();
   } catch (error) {
     state.error = explainLedgerError(error);
@@ -553,7 +565,6 @@ function onboardShell(inner) {
 function gateChoice() {
   onboardShell(`
     <div class="brand"><span class="brand-mark">K</span> Karigar</div>
-    <p class="eyebrow">Jewellery party khata</p>
     <h1>Your Sheet.<br>This counter.</h1>
     <p>Karigar, supplier, cash and metal — one name, one khata. Books stay in the shop’s Google Sheet.</p>
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
@@ -580,7 +591,8 @@ function setupWizard() {
   let body = '';
   if (state.setupStep === 1) {
     body = `
-      <h1>Shop & PIN</h1>
+      <h1>Shop and PIN</h1>
+      <p class="count">Step 1 of 5</p>
       <p>Same PIN goes into Apps Script in a moment.</p>
       ${err}
       <form id="setup-shop">
@@ -592,6 +604,7 @@ function setupWizard() {
   } else if (state.setupStep === 2) {
     body = `
       <h1>License</h1>
+      <p class="count">Step 2 of 5</p>
       <p>Key from your Karigar provider.</p>
       ${err}
       <form id="setup-license">
@@ -601,6 +614,7 @@ function setupWizard() {
   } else if (state.setupStep === 3) {
     body = `
       <h1>Your Sheet</h1>
+      <p class="count">Step 3 of 5</p>
       <p>Blank spreadsheet in the shop Google account.</p>
       ${err}
       <ol class="howto">
@@ -615,6 +629,7 @@ function setupWizard() {
   } else if (state.setupStep === 4) {
     body = `
       <h1>Apps Script</h1>
+      <p class="count">Step 4 of 5</p>
       <p>Paste into this Sheet only — Extensions → Apps Script.</p>
       ${err}
       <ol class="howto">
@@ -629,6 +644,7 @@ function setupWizard() {
   } else {
     body = `
       <h1>Web app URL</h1>
+      <p class="count">Step 5 of 5</p>
       <p>Deploy → Web app → Me / Anyone. Paste the /exec URL. Do not open it in a tab.</p>
       ${err}
       <ol class="howto">
@@ -644,7 +660,6 @@ function setupWizard() {
   onboardShell(`
     <div class="brand"><span class="brand-mark">K</span> Karigar</div>
     ${setupDots()}
-    <p class="eyebrow">Step ${state.setupStep} of 5</p>
     ${body}
     <p class="setup-toggle"><button type="button" class="btn-plain" data-action="setup-back">Back</button></p>
   `);
@@ -655,7 +670,6 @@ function loginScreen() {
   const askUrl = !configured || state.setupOpen;
   onboardShell(`
     <div class="brand"><span class="brand-mark">K</span> Karigar</div>
-    <p class="eyebrow">Shop vault</p>
     <h1>Unlock</h1>
     ${configured ? '<p class="pin-hint">Type your shop PIN. Your phone or computer keyboard will open.</p>' : '<p>Paste the shop /exec URL, then PIN.</p>'}
     ${state.error ? `<div class="notice">${esc(state.error)}</div>` : ''}
@@ -755,7 +769,7 @@ function customersHome() {
     return `<button type="button" class="cell party-row party-card ${t.tone}" data-customer="${esc(row.id)}">
         <span class="avatar">${esc(initials(row.name))}</span>
         <span class="cell-main party-body">
-          <span class="party-title-row"><strong class="party-name">${esc(row.name)}</strong></span>
+          <span class="party-title-row"><strong class="party-name">${esc(row.name)}</strong>${String(row.id || '').startsWith('demo-') ? '<small class="demo-tag">DEMO</small>' : ''}</span>
           ${row.phone ? `<small class="party-phone">${esc(row.phone)}</small>` : ''}
           ${metalPills(row.metalNet)}
         </span>
@@ -791,7 +805,7 @@ function customersHome() {
         </div>
         <ol class="passbook-list tight">${recent.map((row) => `
           <li class="cell clickable" data-edit="sale" data-id="${esc(row.id)}">
-            <span class="cell-main"><strong>${row.kind === RETURN ? 'Returned' : 'Sold'} · ${esc(row.category || '')}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))} · ${fmtDate(row.date)}</small></span>
+            <span class="cell-main"><strong>${row.kind === RETURN ? 'Returned' : 'Sold'}, ${esc(row.category || '')}</strong><small>${esc(row.customerName || customerLabel(state.customers.find((c) => c.id === row.customerId)))}, ${fmtDate(row.date)}</small></span>
             <span class="cell-trail"><b>${money(row.amountInr)}</b></span>
           </li>`).join('') || '<li class="empty-in">No sales this month</li>'}</ol>
       </aside>
@@ -831,11 +845,11 @@ function customerPassbook() {
           <time class="pass-date">${esc(fmtDate(line.date))}</time>
           <span class="cell-main">
             <strong>${line.label}${line.hasPhoto ? ` <span class="photo-flag" title="Has photo">${ic('camera')}</span>` : ''}</strong>
-            <small>${esc(line.detail)}${line.note ? ` · ${esc(line.note)}` : ''}</small>
+            <small>${esc(line.detail)}${line.note ? `, ${esc(line.note)}` : ''}</small>
           </span>
           <span class="cell-trail">
             <b class="${line.kind === 'return' ? 'owe' : 'collect'}">${money(line.amountInr)}</b>
-            <em class="hisab">Paid ${money(line.paidInr)} · Balance ${money(line.runningInr)}</em>
+            <em class="hisab"><span>Paid ${money(line.paidInr)}</span><span>Balance ${money(line.runningInr)}</span></em>
           </span>
         </li>`).join('')}</ol>` : '<div class="empty-in">No sales yet. Tap Sold when this customer buys.</div>'}
     </section>
@@ -919,7 +933,7 @@ function partiesHome() {
         </div>
         <ol class="passbook-list tight">${month.lines.slice(0, 8).map((line) => `
           <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
-            <span class="cell-main"><strong>${esc(line.label)}</strong><small>${esc(line.name)} · ${fmtDate(line.date)}</small></span>
+            <span class="cell-main"><strong>${esc(line.label)}</strong><small>${esc(line.name)}, ${fmtDate(line.date)}</small></span>
             <span class="cell-trail"><b>${line.kind === 'metal' ? grams(line.fig) : money(line.fig)}</b></span>
           </li>`).join('') || '<li class="empty-in">No entries this month</li>'}</ol>
       </aside>
@@ -962,7 +976,7 @@ function supplierPassbook() {
           <time class="pass-date">${esc(fmtDate(line.date))}</time>
           <span class="cell-main">
             <strong>${esc(line.label)}</strong>
-            <small>${line.detail ? `${esc(line.detail)}` : ''}${line.note ? `${line.detail ? ' · ' : ''}${esc(line.note)}` : ''}</small>
+            <small>${line.detail ? `${esc(line.detail)}` : ''}${line.note ? `${line.detail ? ', ' : ''}${esc(line.note)}` : ''}</small>
           </span>
           <span class="cell-trail">
             <b class="${line.amountInr < 0 ? 'collect' : line.amountInr > 0 ? 'owe' : ''}">${line.kind === 'metal' ? grams(line.grams) : money(Math.abs(line.amountInr))}${line.kind === 'settle' && line.grams ? ` · ${grams(line.grams)}` : ''}</b>
@@ -987,7 +1001,7 @@ function reportView() {
   ];
   const activity = report.lines.length ? `<ol class="passbook-list">${report.lines.map((line) => `
           <li class="cell clickable" data-edit="${esc(line.kind === 'settle' ? 'settle' : line.kind)}" data-id="${esc(line.id)}">
-            <span class="cell-main"><strong>${esc(line.label)}</strong><small>${esc(line.name)} · ${fmtDate(line.date)}</small></span>
+            <span class="cell-main"><strong>${esc(line.label)}</strong><small>${esc(line.name)}, ${fmtDate(line.date)}</small></span>
             <span class="cell-trail"><b>${line.kind === 'metal' ? grams(line.fig) : money(line.fig)}</b></span>
           </li>`).join('')}</ol>` : '<div class="empty-in">No entries in this period</div>';
   const byParty = report.byParty.length ? `<div class="report-party-cards">${report.byParty.map((row) => `
@@ -1008,6 +1022,10 @@ function reportView() {
         </div>` : '<div class="empty-in">No party activity in this period</div>';
   return `
     <div class="report-page fill">
+    <header class="print-head">
+      <h2>${esc(state.shopName || 'Karigar')}: report</h2>
+      <p>${range.from ? esc(fmtDate(range.from)) : 'From the start'} to ${range.to ? esc(fmtDate(range.to)) : 'today'}, printed ${esc(fmtDate(today()))}</p>
+    </header>
     <div class="report-toolbar">
       <div class="chips report-presets">
         ${presets.map(([id, label]) => `<button type="button" class="chip ${state.reportPreset === id ? 'on' : ''}" data-action="preset" data-preset="${id}">${label}</button>`).join('')}
@@ -1117,8 +1135,8 @@ function tourOverlay() {
   const last = state.tourStep >= TOUR.length - 1;
   return `<div class="tour-backdrop">
     <section class="tour-card">
-      <p class="eyebrow">How this works · ${state.tourStep + 1} / ${TOUR.length}</p>
       <h2>${esc(step.title)}</h2>
+      <p class="count">Tip ${state.tourStep + 1} of ${TOUR.length}</p>
       <p>${esc(step.body)}</p>
       <div class="form-actions tour-actions">
         <button type="button" class="btn btn-soft" data-action="tour-skip">Skip</button>
@@ -1165,11 +1183,11 @@ function booksView() {
         <div class="list-head"><span>Demo only</span></div>
         <p class="sheet-warn">Writes into the Sheet, not the app. Do not use on live books.</p>
         <button class="cell" data-action="seed-demo" type="button">
-          <span class="cell-main"><strong>Load demo khata</strong><small>Sample parties and journals into this Google Sheet</small></span>
+          <span class="cell-main"><strong>Load demo khata</strong><small>Sample suppliers, customers and sales into this Google Sheet</small></span>
           ${ic('chevron')}
         </button>
         <button class="cell" data-action="strip-demo" type="button">
-          <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes demo- parties and their sample journals</small></span>
+          <span class="cell-main"><strong>Remove demo khata</strong><small>Deletes only the demo suppliers, customers and their entries</small></span>
           ${ic('chevron')}
         </button>
       </section>
@@ -1189,48 +1207,34 @@ function viewContent() {
   return partiesHome();
 }
 
-function viewTitle() {
-  if (state.view === 'report' || state.view === 'today') return 'Report';
-  if (state.view === 'masters') return 'Metals and categories';
-  if (state.view === 'customers') return 'Customers';
-  if (state.view === 'books') return 'Sheet';
-  if (state.view === 'help') return 'How this works';
-  if (state.view === 'supplier' || state.view === 'customer') return '';
-  return 'Suppliers';
-}
-
 function render() {
   if (!state.unlocked) return landing();
-  const title = viewTitle();
   const on = (...views) => (views.includes(state.view) ? 'active' : '');
   const outdated = state.scriptOutdated
     ? `<div class="notice warn"><strong>One-time update needed for customers and photos.</strong> Until then customers are not saved. <button type="button" class="btn btn-primary banner-btn" data-action="modal" data-modal="updateSheet">Show me how — step by step</button></div>`
     : '';
   root.innerHTML = `<div class="shop">
-    <aside class="shop-nav" aria-label="Shop">
-      <div class="nav-brand"><span class="brand-mark">K</span> <span>Karigar</span></div>
-      <button class="nav-item nav-core ${on('customers', 'customer')}" data-view="customers" type="button">${ic('customers')}<span>Customers</span></button>
-      <button class="nav-item nav-core ${on('parties', 'supplier')}" data-view="parties" type="button">${ic('parties')}<span>Suppliers</span></button>
-      <button class="nav-item nav-core ${on('report', 'today')}" data-view="report" type="button">${ic('today')}<span class="nav-phone">Today</span><span class="nav-desk">Report</span></button>
-      <button class="nav-item ${on('masters')}" data-view="masters" type="button">${ic('masters')}<span>Metals</span></button>
-      <button class="nav-item nav-core ${on('books')}" data-view="books" type="button">${ic('sheet')}<span>Sheet</span></button>
-      <button class="nav-item ${on('help')}" data-view="help" type="button">${ic('help')}<span>How to</span></button>
-      <button class="nav-item nav-lock" data-action="logout" type="button">${ic('lock')}<span>Lock</span></button>
-    </aside>
+    <header class="appbar">
+      <div class="brand"><span class="brand-mark">K</span> <span>${esc(state.shopName || 'Karigar')}</span></div>
+      <nav class="shop-nav" aria-label="Shop">
+        <button class="nav-item nav-core ${on('customers', 'customer')}" data-view="customers" type="button" ${on('customers', 'customer') ? 'aria-current="page"' : ''}>${ic('customers')}<span>Customers</span></button>
+        <button class="nav-item nav-core ${on('parties', 'supplier')}" data-view="parties" type="button" ${on('parties', 'supplier') ? 'aria-current="page"' : ''}>${ic('parties')}<span>Suppliers</span></button>
+        <button class="nav-item nav-core ${on('report', 'today')}" data-view="report" type="button" ${on('report', 'today') ? 'aria-current="page"' : ''}>${ic('today')}<span>Report</span></button>
+        <button class="nav-item ${on('masters')}" data-view="masters" type="button" ${on('masters') ? 'aria-current="page"' : ''}>${ic('masters')}<span>Metals</span></button>
+        <button class="nav-item nav-core ${on('books')}" data-view="books" type="button" ${on('books') ? 'aria-current="page"' : ''}>${ic('sheet')}<span>Sheet</span></button>
+        <button class="nav-item ${on('help')}" data-view="help" type="button" ${on('help') ? 'aria-current="page"' : ''}>${ic('help')}<span>How to</span></button>
+      </nav>
+      <div class="appbar-end">
+        ${state.saving || state.syncing ? '<span class="sync-dot" role="status" aria-label="Saving"></span>' : ''}
+        <button class="btn-refresh" data-action="refresh" type="button" ${state.syncing ? 'disabled' : ''} aria-label="Refresh data">
+          ${ic('refresh')}<span>Refresh data</span>
+        </button>
+        <button class="icon-btn text-size" data-action="text-size" type="button" aria-label="${state.bigText ? 'Normal text size' : 'Bigger text'}"><span aria-hidden="true">A<sup>${state.bigText ? '−' : '+'}</sup></span></button>
+        <button class="icon-btn help-btn" data-view="help" type="button" aria-label="How this works">${ic('help')}</button>
+        <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock the app">${ic('lock')}<span class="lock-text">Lock</span></button>
+      </div>
+    </header>
     <div class="shop-body">
-      <header class="appbar">
-        <div class="brand"><span class="brand-mark">K</span> <span>${esc(state.shopName || 'Karigar')}</span></div>
-        ${title ? `<h1 class="appbar-title">${esc(title)}</h1>` : ''}
-        <div class="appbar-end">
-          ${state.saving || state.syncing ? '<span class="sync-dot"></span>' : ''}
-          <button class="btn-refresh" data-action="refresh" type="button" ${state.syncing ? 'disabled' : ''} aria-label="Refresh data">
-            ${ic('refresh')}<span>Refresh data</span>
-          </button>
-          <button class="icon-btn text-size" data-action="text-size" type="button" aria-label="${state.bigText ? 'Normal text size' : 'Bigger text'}"><span aria-hidden="true">A<sup>${state.bigText ? '−' : '+'}</sup></span></button>
-          <button class="icon-btn" data-view="help" type="button" aria-label="How this works">${ic('help')}</button>
-          <button class="icon-btn mast-lock" data-action="logout" type="button" aria-label="Lock">${ic('lock')}</button>
-        </div>
-      </header>
       ${rateBoard()}
       <main class="stage">
         ${outdated}
