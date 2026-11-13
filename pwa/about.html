@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=sentient@300,400&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap">
-  <link rel="stylesheet" href="./styles.css?v=20261113layout">
+  <link rel="stylesheet" href="./styles.css?v=20261113trust">
 </head>
 <body class="doc-page">
   <header class="doc-bar">
@@ -42,13 +42,34 @@
       <h2 id="disclaimer-h">Disclaimer</h2>
       <ul>
         <li><strong>Your records, your responsibility.</strong> Karigar is a record-keeping tool. Balances and reports are only as correct as the entries made. Check them before you rely on them. It is not accounting, tax or legal advice, and it does not file GST or any return. Ask your accountant.</li>
-        <li><strong>Rates are a guide.</strong> Live gold, silver and platinum rates are the international price turned into rupees per gram. They are not Indian board or bullion rates, can be delayed or unavailable, and leave out duty, tax and your dealer’s margin. Do not use them to settle a trade, and they are not investment advice. Confirm the price with your bullion dealer.</li>
+        <li><strong>Rates are a guide.</strong> Live gold, silver and platinum rates are the world market price turned into rupees per gram, with India’s import duty added. They are not your dealer’s rate, they can be delayed or unavailable, and they leave out GST, making charges and your dealer’s margin. Do not use them to settle a trade, and they are not investment advice. Confirm the price with your bullion dealer. See <a href="#rates">where the rates come from</a>.</li>
         <li><strong>Your data, your Google account.</strong> Everything lives in a Google Sheet and Google Drive folder that you own. You are responsible for who can open them, for backups, and for the security of your Google account. Deleting an entry, a photo or the Sheet cannot be undone by Karigar.</li>
         <li><strong>The PIN is a convenience lock.</strong> It keeps casual visitors out of the app. It is not bank-grade security. Keep it private, change it if it leaks, and do not share the Sheet or the script with people you do not trust.</li>
         <li><strong>Other people’s details.</strong> If you store a customer’s phone number, birthday or photo, you are responsible for having their permission and for following the data protection laws that apply to your shop.</li>
         <li><strong>As is.</strong> Karigar is provided as it is, without any promise that it is error free or always available. To the extent the law allows, the maker is not liable for losses from its use, from wrong or missing rates, from lost data, or from the services it depends on being down.</li>
         <li><strong>Messages are sent by you.</strong> Call, WhatsApp and email buttons open your own apps with a message ready. Nothing is sent until you press send.</li>
       </ul>
+    </section>
+
+    <section id="rates" aria-labelledby="rates-h">
+      <h2 id="rates-h">Where the rates come from</h2>
+      <ul>
+        <li><strong>The world price.</strong> Gold, silver and platinum prices come from gold-api.com, checked against a second source (Coinbase). The dollar-to-rupee rate comes from open.er-api.com. If the two price sources differ by more than 3%, the app says so.</li>
+        <li><strong>The sum.</strong> World price per ounce, times the dollar rate, divided by 31.1035 grams in a troy ounce, times the purity (22K is 22 parts in 24, 925 silver is 92.5%).</li>
+        <li><strong>India’s duty.</strong> A shop in India pays import duty on bullion, so the app adds a percentage on top. It starts at 6% for gold and silver and 6.4% for platinum, which were India’s duty rates when this was written. Duty changes, so check it.</li>
+        <li><strong>Match your dealer.</strong> On the Today page, open “Match my dealer’s rate”, type what your dealer quoted (per gram, per 10 grams or per kilogram) and the app adjusts itself to match. A rate you type on the Metals page always wins.</li>
+      </ul>
+    </section>
+
+    <section id="pin" aria-labelledby="pin-h">
+      <h2 id="pin-h">Forgot your PIN?</h2>
+      <p>Your PIN is stored in the script that runs your Sheet. Open your Google Sheet, choose Extensions, then Apps Script, and look at the top of the code for <code>SCRIPT_PIN</code>. To change it, edit that line, save, then choose Deploy, Manage deployments, the pencil, New version, Deploy. The new PIN works straight away.</p>
+      <p class="note">After 8 wrong tries the app locks for 10 minutes. That protects your books from guessing.</p>
+    </section>
+
+    <section id="backup" aria-labelledby="backup-h">
+      <h2 id="backup-h">Backups</h2>
+      <p>Your books already live in your Google Sheet. For a copy of your own, open Sheet in the app and tap Download a backup. It saves one file with your suppliers, customers and entries. Photos stay in your Google Drive folder.</p>
     </section>
 
     <section id="privacy" aria-labelledby="privacy-h">
@@ -58,7 +79,7 @@
         <li><strong>In your Google Sheet:</strong> suppliers, customers, entries, notes, categories and the demo data if you load it. Customer balances are also written to a readable tab for your accountant.</li>
         <li><strong>In your Google Drive:</strong> the photos you take on a sale or return, in a folder called “Karigar photos”. The script only reads and changes files in that folder.</li>
         <li><strong>On this device:</strong> the link to your Sheet, a copy of your books so the app opens fast, your license key, your text size and the last live rates. The PIN is kept only while the tab is open. Clear the browser’s site data to remove the device copy.</li>
-        <li><strong>Sent to other services:</strong> the app asks <em>gold-api.com</em> and <em>open.er-api.com</em> for prices. No shop or customer information goes with those requests, but those services can see your device’s internet address. Fonts come from Fontshare and Google Fonts, which can see it too. Your Sheet is read and written through Google Apps Script.</li>
+        <li><strong>Sent to other services:</strong> the app asks <em>gold-api.com</em>, <em>coinbase.com</em> and <em>open.er-api.com</em> for prices. No shop or customer information goes with those requests, but those services can see your device’s internet address. Fonts come from Fontshare and Google Fonts, which can see it too. Your Sheet is read and written through Google Apps Script.</li>
         <li><strong>Your license:</strong> the app checks your license key with the license service so it can tell whether your plan is active.</li>
       </ul>
     </section>

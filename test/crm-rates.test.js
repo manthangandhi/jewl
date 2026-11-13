@@ -5,7 +5,8 @@ import {
   whatsappNumber, whatsappLink, telLink, mailLink, duesReminderText, daysUntil, dueFollowUps, upcomingDates, notesFor, whenLabel
 } from '../pwa/crm.js';
 import {
-  purityFactor, ratePerGram, liveRate, effectiveRate, suggestedAmount, ratesAreStale, describeAge, fetchLiveRates, GRAMS_PER_TROY_OUNCE
+  purityFactor, ratePerGram, liveRate, effectiveRate, suggestedAmount, ratesAreStale, describeAge, fetchLiveRates, GRAMS_PER_TROY_OUNCE,
+  adjustFor, DEFAULT_ADJUST, parityRate, calibrateAdjust, perGramFromUnit, dealerQuote
 } from '../pwa/rates.js';
 import { LABEL, balanceName } from '../pwa/labels.js';
 import { customerBalance, buildCustomerPassbook, salesPeriodTotals, categoryTotals, validatePayment } from '../pwa/customer-math.js';
@@ -94,20 +95,82 @@ test('rates go stale after ten minutes and say how old they are', () => {
   assert.equal(describeAge(now - 3 * 3600000, now), '3 h ago');
 });
 
-test('fetchLiveRates reads the four feeds and refuses nonsense', async () => {
-  const feeds = {
-    'https://api.gold-api.com/price/XAU': { price: 3900, updatedAt: 't' },
-    'https://api.gold-api.com/price/XAG': { price: 50 },
-    'https://api.gold-api.com/price/XPT': { price: 1500 },
-    'https://open.er-api.com/v6/latest/USD': { rates: { INR: 90 } }
-  };
-  const ok = async (url) => ({ ok: true, json: async () => feeds[url] });
-  const snap = await fetchLiveRates(ok, 123);
+const feedsOk = {
+  'https://api.gold-api.com/price/XAU': { price: 3900 },
+  'https://api.gold-api.com/price/XAG': { price: 50 },
+  'https://api.gold-api.com/price/XPT': { price: 1500 },
+  'https://open.er-api.com/v6/latest/USD': { rates: { INR: 90 } },
+  'https://api.coinbase.com/v2/prices/XAU-USD/spot': { data: { amount: '3890' } },
+  'https://api.coinbase.com/v2/prices/XAG-USD/spot': { data: { amount: '49.9' } },
+  'https://api.coinbase.com/v2/prices/XPT-USD/spot': { data: { amount: '1506' } }
+};
+const serve = (overrides = {}) => async (url) => {
+  const body = url in overrides ? overrides[url] : feedsOk[url];
+  if (body === null) throw new TypeError('Failed to fetch');
+  if (body && body.__status) return { ok: false, status: body.__status };
+  return { ok: true, json: async () => body };
+};
+
+test('fetchLiveRates reads the feeds, cross-checks gold, and says where the prices came from', async () => {
+  const snap = await fetchLiveRates(serve(), 123);
   assert.deepEqual([snap.gold, snap.silver, snap.platinum, snap.usdInr, snap.fetchedAt], [3900, 50, 1500, 90, 123]);
-  const bad = async (url) => ({ ok: true, json: async () => (url.includes('er-api') ? { rates: {} } : feeds[url]) });
-  await assert.rejects(() => fetchLiveRates(bad), /makes no sense/);
-  const down = async () => ({ ok: false, status: 503 });
-  await assert.rejects(() => fetchLiveRates(down), /503/);
+  assert.deepEqual(snap.sources, ['gold-api.com']);
+  assert.equal(snap.disagreePct, 0.3);
+  assert.deepEqual(snap.missing, []);
+});
+
+test('a dead main feed falls back to the second source, and a wild disagreement is flagged', async () => {
+  const snap = await fetchLiveRates(serve({ 'https://api.gold-api.com/price/XAU': null }), 1);
+  assert.equal(snap.gold, 3890);
+  assert.ok(snap.sources.includes('Coinbase'));
+  const wild = await fetchLiveRates(serve({ 'https://api.coinbase.com/v2/prices/XAU-USD/spot': { data: { amount: '3000' } } }), 1);
+  assert.ok(wild.disagreePct > 20);
+});
+
+test('nonsense prices are refused, and the dollar rate falls back to the last known one', async () => {
+  await assert.rejects(() => fetchLiveRates(serve({ 'https://api.gold-api.com/price/XAU': { price: 12 }, 'https://api.coinbase.com/v2/prices/XAU-USD/spot': { data: { amount: '5' } } })), /gold price/);
+  await assert.rejects(() => fetchLiveRates(serve({ 'https://open.er-api.com/v6/latest/USD': { rates: {} } })), /dollar-rupee/);
+  const prev = { usdInr: 88, fetchedAt: 1000, silver: 49, platinum: 1400 };
+  const snap = await fetchLiveRates(serve({ 'https://open.er-api.com/v6/latest/USD': { __status: 503 } }), 2000, prev);
+  assert.equal(snap.usdInr, 88);
+  assert.equal(snap.fxStale, true);
+  const old = await fetchLiveRates(serve(), 1000 + 4 * 86400000, { usdInr: 88, fetchedAt: 1000 });
+  assert.equal(old.usdInr, 90);
+});
+
+test('India import duty is the starting adjustment, per metal, and the owner can change it', () => {
+  assert.deepEqual(DEFAULT_ADJUST, { GOLD: 6, SILVER: 6, PLATINUM: 6.4 });
+  assert.equal(adjustFor({}, 'gold'), 6);
+  assert.equal(adjustFor({ GOLD: 7.5 }, 'GOLD'), 7.5);
+  assert.equal(adjustFor({ GOLD: 0 }, 'GOLD'), 0);
+  assert.equal(adjustFor({ GOLD: '' }, 'GOLD'), 6);
+  const snapshot = { gold: 3900, silver: 50, platinum: 1500, usdInr: 90 };
+  const world = parityRate(snapshot, 'GOLD', '24K');
+  assert.equal(world, Math.round((3900 * 90) / GRAMS_PER_TROY_OUNCE));
+  const withDuty = effectiveRate({ snapshot, adjust: DEFAULT_ADJUST }, 'GOLD', '24K').perGram;
+  assert.equal(withDuty, Math.round(((3900 * 90) / GRAMS_PER_TROY_OUNCE) * 1.06));
+  assert.ok(withDuty > world);
+});
+
+test('matching a dealer: the adjustment that reproduces the quoted rate', () => {
+  const snapshot = { gold: 3900, silver: 50, platinum: 1500, usdInr: 90 };
+  const world = parityRate(snapshot, 'GOLD', '24K');
+  const pct = calibrateAdjust({ snapshot, metalType: 'GOLD', purity: '24K', dealerPerGram: world * 1.07 });
+  assert.ok(Math.abs(pct - 7) <= 0.1);
+  assert.equal(calibrateAdjust({ snapshot, metalType: 'GOLD', purity: '24K', dealerPerGram: world * 3 }), null);
+  assert.equal(calibrateAdjust({ snapshot: null, metalType: 'GOLD', purity: '24K', dealerPerGram: 100 }), null);
+  assert.equal(perGramFromUnit(125000, '10g'), 12500);
+  assert.equal(perGramFromUnit(150000, 'kg'), 150);
+  assert.equal(perGramFromUnit(12500, 'gram'), 12500);
+  const matched = effectiveRate({ snapshot, adjust: { GOLD: pct } }, 'GOLD', '24K').perGram;
+  assert.ok(Math.abs(matched - world * 1.07) < world * 0.002);
+});
+
+test('rates are also shown the way shops quote them', () => {
+  assert.deepEqual(dealerQuote('GOLD', 12500), { unit: '10g', amount: 125000, label: 'per 10 g' });
+  assert.deepEqual(dealerQuote('SILVER', 150), { unit: 'kg', amount: 150000, label: 'per kg' });
+  assert.deepEqual(dealerQuote('PLATINUM', 3200), { unit: '10g', amount: 32000, label: 'per 10 g' });
+  assert.equal(dealerQuote('GOLD', 0), null);
 });
 
 test('one vocabulary: the same words for money owed and for each kind of entry', () => {

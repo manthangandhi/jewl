@@ -8,7 +8,10 @@ import {
   NOTE_KINDS, CUSTOMER_TAGS, SUPPLIER_TAGS, telLink, whatsappLink, mailLink, duesReminderText,
   dueFollowUps, upcomingDates, notesFor, whenLabel, daysUntil
 } from './crm.js';
-import { fetchLiveRates, effectiveRate, suggestedAmount, ratesAreStale, describeAge } from './rates.js';
+import {
+  fetchLiveRates, effectiveRate, suggestedAmount, ratesAreStale, describeAge, adjustFor, parityRate, calibrateAdjust,
+  perGramFromUnit, dealerQuote, DEFAULT_ADJUST
+} from './rates.js';
 import { compressImage, photoFileName } from './photo.js';
 import {
   emptyLedger, upsertById, removeById, deleteSupplierCascade, prepareSavePayload, mergeJournals, seedMetalMaster,
@@ -29,7 +32,7 @@ const TEXT_KEY = 'karigar.bigText';
 const SHOP_NAME_KEY = 'karigar.shopName';
 const LICENSE_KEY_STORE = 'karigar.licenseKey';
 const RATES_KEY = 'karigar.liveRates';
-const PREMIUM_KEY = 'karigar.ratePremium';
+const ADJUST_KEY = 'karigar.rateAdjust';
 const TOUR = [
   { title: 'Today', body: 'Today shows live gold and silver rates, who to follow up with, birthdays and anniversaries coming up, and the biggest dues.' },
   { title: 'One card per person', body: 'Each supplier and each customer has one card with their phone, notes and follow-up date. Cash and every metal sit on the same card.' },
@@ -73,7 +76,10 @@ const state = {
   rates: null,
   ratesLoading: false,
   ratesError: '',
-  premiumPct: 0,
+  rateAdjust: { ...DEFAULT_ADJUST },
+  adjustOpen: false,
+  installEvent: null,
+  calibrateNote: '',
   customerSearch: '',
   custSummary: null,
   customerDetail: null,
@@ -129,6 +135,8 @@ function ic(name) {
     gift: '<rect x="4" y="9" width="16" height="11"/><path d="M12 9v11M3 9h18M12 9c-2-4-6-4-5-1.5C8 9 12 9 12 9zM12 9c2-4 6-4 5-1.5C16 9 12 9 12 9z"/>',
     eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
+    shield2: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+    phoneapp: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
     gem: '<path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9 4l-1 5 4 11M15 4l1 5-4 11"/>',
     sold: '<path d="M6 8h12l1 12H5z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
     returned: '<path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/>',
@@ -400,29 +408,38 @@ function forgetSessionUnlock() {
   try { sessionStorage.removeItem(SESSION_UNLOCK_KEY); } catch { /* ignore */ }
 }
 
+/** Fold what is in the Sheet into this screen, keeping every change that has not been saved yet. */
+function mergeRemote(remote) {
+  const keep = { dirty: state.dirty, deleted: state.deleted };
+  const pick = (key) => mergeJournals(remote[key] || [], state[key], { deletedIds: state.deleted[key], dirtyIds: state.dirty[key] });
+  const merged = {
+    meta: remote.meta,
+    shopName: remote.meta?.shopName || state.shopName,
+    spreadsheetUrl: remote.spreadsheetUrl,
+    lastSavedAt: remote.meta?.lastSavedAt || remote.lastSavedAt,
+    suppliers: pick('suppliers'),
+    money: pick('money'),
+    metal: pick('metal'),
+    settlements: pick('settlements'),
+    metalMaster: pick('metalMaster'),
+    customers: pick('customers'),
+    sales: pick('sales'),
+    categories: pick('categories'),
+    interactions: pick('interactions')
+  };
+  const outdated = !Array.isArray(remote.interactions);
+  applyLoaded(merged);
+  // applyLoaded starts a clean slate; unsaved work is still unsaved, so it stays marked.
+  state.dirty = keep.dirty;
+  state.deleted = keep.deleted;
+  state.scriptOutdated = outdated;
+}
+
 async function refreshFromSheet() {
   state.syncing = true;
   render();
   try {
-    const remote = await sheetsRequest({ action: 'load' });
-    const merged = {
-      meta: remote.meta,
-      shopName: remote.meta?.shopName || state.shopName,
-      spreadsheetUrl: remote.spreadsheetUrl,
-      lastSavedAt: remote.meta?.lastSavedAt || remote.lastSavedAt,
-      suppliers: mergeJournals(remote.suppliers || [], state.suppliers, { deletedIds: state.deleted.suppliers, dirtyIds: state.dirty.suppliers }),
-      money: mergeJournals(remote.money || [], state.money, { deletedIds: state.deleted.money, dirtyIds: state.dirty.money }),
-      metal: mergeJournals(remote.metal || [], state.metal, { deletedIds: state.deleted.metal, dirtyIds: state.dirty.metal }),
-      settlements: mergeJournals(remote.settlements || [], state.settlements, { deletedIds: state.deleted.settlements, dirtyIds: state.dirty.settlements }),
-      metalMaster: mergeJournals(remote.metalMaster || [], state.metalMaster, { deletedIds: state.deleted.metalMaster, dirtyIds: state.dirty.metalMaster }),
-      customers: mergeJournals(remote.customers || [], state.customers, { deletedIds: state.deleted.customers, dirtyIds: state.dirty.customers }),
-      sales: mergeJournals(remote.sales || [], state.sales, { deletedIds: state.deleted.sales, dirtyIds: state.dirty.sales }),
-      categories: mergeJournals(remote.categories || [], state.categories, { deletedIds: state.deleted.categories, dirtyIds: state.dirty.categories }),
-      interactions: mergeJournals(remote.interactions || [], state.interactions, { deletedIds: state.deleted.interactions, dirtyIds: state.dirty.interactions })
-    };
-    const outdated = !Array.isArray(remote.interactions);
-    applyLoaded(merged);
-    state.scriptOutdated = outdated;
+    mergeRemote(await sheetsRequest({ action: 'load' }));
     writeCache();
     state.error = null;
     if (state.needsDedupeSave) {
@@ -438,7 +455,7 @@ async function refreshFromSheet() {
       state.error = explainLedgerError(error);
       return landing();
     }
-    state.error = error.message;
+    state.error = explainLedgerError(error);
   } finally {
     state.syncing = false;
     if (state.unlocked) render();
@@ -490,7 +507,7 @@ async function stripDemoFromSheet() {
   }
 }
 
-async function persist() {
+async function persist(retried = false) {
   state.saving = true;
   render();
   try {
@@ -507,14 +524,23 @@ async function persist() {
       categories: state.categories,
       interactions: state.interactions
     });
-    const data = await sheetsRequest({ action: 'save', ...payload });
+    // `expect` is the version of the Sheet this screen last saw. If someone else saved since, the Sheet says STALE.
+    const data = await sheetsRequest({ action: 'save', expect: state.lastSavedAt || '', ...payload });
     state.spreadsheetUrl = data.spreadsheetUrl || state.spreadsheetUrl;
-    state.lastSavedAt = data.lastSavedAt || now;
+    state.lastSavedAt = now;
     state.dirty = emptyTrack();
     state.deleted = emptyTrack();
     refreshSummary();
     writeCache();
-    toast('Saved to your Google Sheet');
+    toast(retried ? 'Saved, together with changes from another device' : 'Saved to your Google Sheet');
+  } catch (error) {
+    if (!retried && /STALE/.test(String(error && error.message))) {
+      // Another phone or computer saved first. Bring its changes in, keep ours, and save once more.
+      mergeRemote(await sheetsRequest({ action: 'load' }));
+      state.saving = false;
+      return persist(true);
+    }
+    throw error;
   } finally {
     state.saving = false;
   }
@@ -604,23 +630,46 @@ function landing() {
   return loginScreen();
 }
 
+const LOGIN_RATES = [['GOLD', '24K'], ['GOLD', '22K'], ['SILVER', '999']];
+
+/** The three headline rates, shown on the sign-in screen from the public feeds (no shop data needed). */
+function loginRatesHtml() {
+  const snap = state.rates;
+  const tiles = LOGIN_RATES.map(([metal, purity]) => {
+    const perGram = effectiveRate({ master: [], snapshot: snap, adjust: state.rateAdjust }, metal, purity).perGram;
+    return `<li data-metal="${metal}"><span>${titleCase(metal)} ${purity}</span><strong>${perGram ? money(perGram) : '…'}</strong><small>per gram</small></li>`;
+  }).join('');
+  const age = snap ? describeAge(snap.fetchedAt) : '';
+  return `<div class="lock-rates" id="lock-rates">
+    <p class="lock-rates-title">${ic('gem')}<span>Today’s rates</span><em>${snap ? `Live, ${esc(age)}` : (state.ratesError ? 'Not available right now' : 'Loading…')}</em></p>
+    <ul>${tiles}</ul>
+  </div>`;
+}
+
+function updateLoginRates() {
+  const el = root.querySelector('#lock-rates');
+  if (el) el.outerHTML = loginRatesHtml();
+}
+
 function onboardShell(inner) {
   const points = [
-    ['customers', 'Suppliers and customers, one card each'],
-    ['gem', 'Live gold, silver and platinum rates'],
-    ['bell', 'Follow-ups, birthdays and notes'],
-    ['camera', 'Photos of every sale and return'],
-    ['shield', 'Your books stay in your own Google account']
+    ['rupee', 'Know who owes what', `${LABEL.weGet} and ${LABEL.weGive} for every supplier and customer, at a glance.`],
+    ['bell', 'Stay in touch', 'Follow-ups, birthdays and one-tap WhatsApp, so nobody is forgotten.'],
+    ['shield', 'Your data stays yours', 'Everything is saved in your own Google Sheet and Drive. We never see it.']
   ];
   root.innerHTML = `<main class="lock-app" tabindex="-1">
     <section class="lock-hero">
       <div class="brand"><span class="brand-mark">${ic('gem')}</span><span>Karigar</span></div>
       <h2>Your shop’s books, kept in your own Google Sheet.</h2>
-      <ul class="lock-points">${points.map(([icon, text]) => `<li>${ic(icon)}<span>${text}</span></li>`).join('')}</ul>
+      ${loginRatesHtml()}
+      <ul class="lock-points">${points.map(([icon, title, text]) => `<li>${ic(icon)}<span><strong>${title}</strong><small>${text}</small></span></li>`).join('')}</ul>
     </section>
     <section class="lock-panel"><div class="onboard-card">${inner}</div></section>
   </main>`;
   bind();
+  loadSavedRates();
+  updateLoginRates();
+  if (!state.rates || ratesAreStale(state.rates.fetchedAt)) loadRates();
 }
 
 function gateChoice() {
@@ -746,6 +795,7 @@ function loginScreen() {
         </span>
       </label>
       <button class="btn btn-primary btn-block" id="login-submit">${ic('lock')}<span>Unlock</span></button>
+      <p class="forgot"><a href="./about.html#pin" target="_blank" rel="noopener">Forgot your PIN?</a></p>
     </form>
     <p class="setup-toggle">
       ${configured ? `<button type="button" class="btn-plain" data-action="setup">${ic('sheet')}<span>Use a different Sheet</span></button>` : ''}
@@ -756,7 +806,7 @@ function loginScreen() {
 }
 
 function effRate(metalType, purity) {
-  return effectiveRate({ master: state.metalMaster, snapshot: state.rates, premiumPct: state.premiumPct }, metalType, purity);
+  return effectiveRate({ master: state.metalMaster, snapshot: state.rates, adjust: state.rateAdjust }, metalType, purity);
 }
 
 /** The rows shown for rates: every active metal and purity the shop uses, with a rate where one is known. */
@@ -778,24 +828,54 @@ function rateBoard() {
 
 function ratesCard() {
   const rows = rateRows();
+  const live = rows.filter((r) => r.perGram > 0);
   const age = state.rates ? describeAge(state.rates.fetchedAt) : '';
-  const status = state.ratesLoading ? 'Updating…' : state.ratesError ? state.ratesError : age ? `Live, updated ${age}` : '';
-  const any = rows.some((r) => r.perGram > 0);
+  const snap = state.rates;
+  let status = state.ratesLoading ? 'Updating…' : state.ratesError ? state.ratesError : age ? `Live, updated ${age}` : '';
+  if (snap && !state.ratesError && !state.ratesLoading) {
+    if (snap.disagreePct > 3) status += `. The two price sources differ by ${snap.disagreePct}%, so check with your dealer first.`;
+    else if (snap.fxStale) status += '. The dollar rate is from earlier.';
+    else if (snap.missing?.length) status += `. No price for ${snap.missing.join(' and ')} right now.`;
+  }
+  const first = live.find((r) => r.source === 'live');
+  const types = [...new Set(rows.map((r) => String(r.row.metalType).toUpperCase()))];
+  const explain = first && snap ? (() => {
+    const t = String(first.row.metalType).toUpperCase();
+    const world = parityRate(snap, t, first.row.purity);
+    return `Example, ${titleCase(t)} ${first.row.purity}: world price ${money(world)} a gram, plus ${adjustFor(state.rateAdjust, t)}% = ${money(first.perGram)} a gram.`;
+  })() : '';
   return `<section class="list-card rates-card" id="rates-card">
     <div class="list-head"><span class="head-title">${ic('gem')}<span>Today’s rates</span></span><button type="button" class="btn-plain" data-action="refresh-rates" ${state.ratesLoading ? 'disabled' : ''}>${ic('refresh')}<span>Refresh rates</span></button></div>
-    ${status ? `<p class="rates-status ${state.ratesError ? 'bad' : ''}" role="status">${esc(status)}</p>` : ''}
-    ${any ? `<ul class="rate-tiles">${rows.filter((r) => r.perGram > 0).map((r) => `<li data-metal="${esc(r.row.metalType)}">
+    ${status ? `<p class="rates-status ${state.ratesError || snap?.disagreePct > 3 ? 'bad' : ''}" role="status">${esc(status)}</p>` : ''}
+    ${live.length ? `<ul class="rate-tiles">${live.map((r) => {
+    const t = String(r.row.metalType).toUpperCase();
+    const q = dealerQuote(t, r.perGram);
+    const tag = r.source === 'board' ? 'Your board rate' : `World price plus ${adjustFor(state.rateAdjust, t)}%`;
+    return `<li data-metal="${esc(r.row.metalType)}">
       <span class="rate-name">${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</span>
-      <strong>${money(r.perGram)}</strong>
-      <span class="rate-src">per gram${r.source === 'board' ? ', your board rate' : ''}</span>
-    </li>`).join('')}</ul>` : `<p class="lede rates-empty">${rows.length ? (state.ratesLoading ? 'Fetching today’s rates…' : 'Rates will show here as soon as the internet is back. You can also type a board rate for each metal on the Metals page.') : 'Add a metal under Metals to see its rate here.'}</p>`}
-    <details class="adjust">
-      <summary>${ic('edit')}<span>Adjust for your market</span></summary>
-      <form class="premium-row" id="premium-form">
-        <label>Add to the international price (percent)
-          <input name="premium" type="number" step="0.1" inputmode="decimal" value="${esc(state.premiumPct || '')}" placeholder="0">
-        </label>
-        <p class="hint">Live rates are the international price turned into rupees. Indian board rates usually run a few percent higher because of duty and tax. Add that difference here, or type your own board rate on the Metals page, which always wins.</p>
+      <strong>${money(r.perGram)}<small>per gram</small></strong>
+      ${q ? `<span class="rate-alt">${money(q.amount)} ${q.label}</span>` : ''}
+      <span class="rate-src">${esc(tag)}</span>
+    </li>`;
+  }).join('')}</ul>` : `<p class="lede rates-empty">${rows.length ? (state.ratesLoading ? 'Fetching today’s rates…' : 'Rates will show here as soon as the internet is back. You can also type a board rate for each metal on the Metals page.') : 'Add a metal under Metals to see its rate here.'}</p>`}
+    <p class="hint rates-note">Indicative rates from the world market in rupees, with India’s import duty added. Your dealer’s rate is the one to trade on. <a href="./about.html#disclaimer" target="_blank" rel="noopener">Read the note</a></p>
+    <details class="adjust" ${state.adjustOpen ? 'open' : ''}>
+      <summary>${ic('edit')}<span>Match my dealer’s rate</span></summary>
+      <form class="calibrate-form" id="calibrate-form" data-own>
+        <p class="hint">Type what your dealer quoted today and the app adjusts to match it. Do this once for each metal, then the rest follows.</p>
+        <div class="field-row">
+          <label>Metal<select name="metal">${rows.map((r) => `<option value="${esc(r.row.metalType)}|${esc(r.row.purity)}">${esc(titleCase(r.row.metalType))} ${esc(r.row.purity)}</option>`).join('')}</select></label>
+          <label>Rate<input name="rate" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 125000" required></label>
+        </div>
+        <label>Quoted<select name="unit"><option value="10g">per 10 grams</option><option value="gram">per gram</option><option value="kg">per kilogram</option></select></label>
+        <button class="btn btn-soft" type="submit">${ic('check')}<span>Match my dealer</span></button>
+        ${state.calibrateNote ? `<p class="hint calibrate-note" role="status">${esc(state.calibrateNote)}</p>` : ''}
+      </form>
+      <form class="adjust-form" id="adjust-form" data-own>
+        <p class="hint">Percent added to the world price. It starts at India’s import duty. ${esc(explain)}</p>
+        <div class="field-row three">
+          ${types.map((t) => `<label>${esc(titleCase(t))} (%)<input name="adj-${esc(t)}" type="number" step="0.1" inputmode="decimal" value="${esc(adjustFor(state.rateAdjust, t))}"></label>`).join('')}
+        </div>
       </form>
     </details>
   </section>`;
@@ -808,17 +888,60 @@ function refreshRateDom() {
   else if (board && !html) board.remove();
   else if (!board && html) { const stage = root.querySelector('.stage'); if (stage) stage.insertAdjacentHTML('beforebegin', html); }
   const card = root.querySelector('#rates-card');
-  if (card) card.outerHTML = ratesCard();
+  if (card) { card.outerHTML = ratesCard(); bindRateHandlers(); }
   const bar = root.querySelector('.appbar-end .btn-refresh');
   if (bar) bar.disabled = state.syncing;
   updateRateSuggest();
+}
+
+function saveAdjust() {
+  try { localStorage.setItem(ADJUST_KEY, JSON.stringify(state.rateAdjust)); } catch { /* ignore */ }
+}
+
+function bindRateHandlers() {
+  const details = root.querySelector('details.adjust');
+  if (details) details.ontoggle = () => { state.adjustOpen = details.open; };
+  const adjust = root.querySelector('#adjust-form');
+  if (adjust) {
+    adjust.onsubmit = (event) => event.preventDefault();
+    for (const input of adjust.querySelectorAll('input')) {
+      input.onchange = () => {
+        const type = input.name.replace('adj-', '');
+        const n = Number(input.value);
+        state.rateAdjust[type] = input.value === '' || !Number.isFinite(n) ? (DEFAULT_ADJUST[type] ?? 0) : Math.max(-20, Math.min(40, n));
+        saveAdjust();
+        state.calibrateNote = '';
+        refreshRateDom();
+      };
+    }
+  }
+  const calibrate = root.querySelector('#calibrate-form');
+  if (calibrate) {
+    calibrate.onsubmit = (event) => {
+      event.preventDefault();
+      const [metal, purity] = String(calibrate.elements.metal.value).split('|');
+      const perGram = perGramFromUnit(calibrate.elements.rate.value, calibrate.elements.unit.value);
+      const pct = calibrateAdjust({ snapshot: state.rates, metalType: metal, purity, dealerPerGram: perGram });
+      if (pct === null) {
+        state.calibrateNote = state.rates ? 'That rate looks too far from the market. Check the number and the unit (per gram, per 10 grams or per kilogram).' : 'Live rates are not loaded yet. Try again in a moment.';
+      } else {
+        state.rateAdjust[String(metal).toUpperCase()] = pct;
+        saveAdjust();
+        state.calibrateNote = `Done. ${titleCase(metal)} now matches your dealer, at ${pct}% over the world price.`;
+        toast('Rates now match your dealer');
+      }
+      state.adjustOpen = true;
+      refreshRateDom();
+    };
+  }
 }
 
 function loadSavedRates() {
   try {
     const saved = JSON.parse(localStorage.getItem(RATES_KEY) || 'null');
     if (saved && saved.usdInr > 0 && saved.gold > 0) state.rates = saved;
-    state.premiumPct = Number(localStorage.getItem(PREMIUM_KEY) || 0) || 0;
+    const adj = JSON.parse(localStorage.getItem(ADJUST_KEY) || 'null');
+    if (adj && typeof adj === 'object') state.rateAdjust = { ...DEFAULT_ADJUST, ...adj };
   } catch { /* ignore */ }
 }
 
@@ -830,14 +953,16 @@ async function loadRates(force = false) {
   state.ratesLoading = true;
   state.ratesError = '';
   if (state.unlocked) refreshRateDom();
+  else updateLoginRates();
   try {
-    state.rates = await fetchLiveRates(fetch);
+    state.rates = await fetchLiveRates(fetch, Date.now(), state.rates);
     try { localStorage.setItem(RATES_KEY, JSON.stringify(state.rates)); } catch { /* ignore */ }
   } catch {
     state.ratesError = state.rates ? 'Could not refresh. Showing the last rates.' : 'Could not load live rates. Check your internet.';
   } finally {
     state.ratesLoading = false;
     if (state.unlocked) refreshRateDom();
+    else updateLoginRates();
   }
 }
 
@@ -851,7 +976,7 @@ function updateRateSuggest() {
   if (!perGram) { box.hidden = true; return; }
   box.hidden = false;
   box.innerHTML = amount
-    ? `At ${source === 'board' ? 'your board rate' : 'today’s live rate'} of ${money(perGram)} a gram, this comes to <b>${money(amount)}</b>. <button type="button" class="btn-plain" data-action="use-suggest" data-amount="${amount}">Use this amount</button>`
+    ? `At ${source === 'board' ? 'your board rate' : 'today’s rate'} of ${money(perGram)} a gram, this comes to <b>${money(amount)}</b>. <button type="button" class="btn-plain" data-action="use-suggest" data-amount="${amount}">Use this amount</button>`
     : `${source === 'board' ? 'Your board rate' : 'Today’s live rate'}: ${money(perGram)} a gram.`;
 }
 
@@ -1419,6 +1544,15 @@ function booksView() {
             <span class="cell-ic">${ic('help')}</span><span class="cell-main"><strong>How this works</strong><small>Short help for every screen</small></span>
             ${ic('chevron')}
           </button>
+          <button class="cell" data-action="backup" type="button">
+            <span class="cell-ic">${ic('download')}</span>
+            <span class="cell-main"><strong>Download a backup</strong><small>One file with all your suppliers, customers and entries</small></span>
+          </button>
+          ${isStandalone() ? '' : `<button class="cell" data-action="install" type="button">
+            <span class="cell-ic">${ic('phoneapp')}</span>
+            <span class="cell-main"><strong>Install on this device</strong><small>Open Karigar like an app from your home screen</small></span>
+            ${ic('chevron')}
+          </button>`}
           <a class="cell" href="./about.html" target="_blank" rel="noopener">
             <span class="cell-ic">${ic('shield')}</span><span class="cell-main"><strong>About, privacy and support</strong><small>Disclaimer, where your data lives, and how to reach us</small></span>
             ${ic('chevron')}
@@ -1881,6 +2015,18 @@ function custPayModal() {
   </section></div>`;
 }
 
+function installModal() {
+  return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Install Karigar">
+    <div class="section-head"><h2>Install Karigar</h2><button class="btn-plain" data-action="close" type="button">${ic('close')}<span>Close</span></button></div>
+    <ol class="steps-big">
+      <li><strong>iPhone or iPad</strong><span>Open this page in Safari. Tap the Share button, then Add to Home Screen.</span></li>
+      <li><strong>Android phone</strong><span>Open this page in Chrome. Tap the three dots, then Install app (or Add to Home screen).</span></li>
+      <li><strong>Windows or Mac</strong><span>In Chrome or Edge, click the install icon at the right end of the address bar.</span></li>
+    </ol>
+    <div class="form-actions"><button type="button" class="btn btn-soft" data-action="close">${ic('close')}<span>Close</span></button></div>
+  </section></div>`;
+}
+
 function modal() {
   const kind = state.modal;
   if (kind === 'supplier') return supplierModal();
@@ -1890,6 +2036,7 @@ function modal() {
   if (kind === 'settle') return settleModal();
   if (kind === 'metalMaster') return metalMasterModal();
   if (kind === 'updateSheet') return updateSheetModal();
+  if (kind === 'install') return installModal();
   if (kind === 'customer') return customerModal();
   if (kind === 'sale' || kind === 'return') return state.editing?.kind === PAYMENT ? custPayModal() : saleModal(kind);
   if (kind === 'custpay') return custPayModal();
@@ -2011,6 +2158,49 @@ async function finishFollowUp(kind, id) {
   state[key] = upsertById(list, stamp({ ...row, followUpDate: '', followUpNote: '' }, false));
   markDirty(key, id);
   await persist();
+  render();
+}
+
+const isStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  state.installEvent = event;
+});
+
+function downloadBackup() {
+  const stamp = today();
+  const data = {
+    app: 'Karigar',
+    exportedAt: new Date().toISOString(),
+    shopName: state.shopName,
+    suppliers: state.suppliers,
+    money: state.money,
+    metal: state.metal,
+    settlements: state.settlements,
+    metalMaster: state.metalMaster,
+    customers: state.customers,
+    sales: state.sales,
+    categories: state.categories,
+    interactions: state.interactions
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `karigar-backup-${stamp}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Backup downloaded. Keep the file somewhere safe.');
+}
+
+async function installApp() {
+  if (state.installEvent) {
+    state.installEvent.prompt();
+    try { await state.installEvent.userChoice; } catch { /* ignore */ }
+    state.installEvent = null;
+    return;
+  }
+  state.modal = 'install';
   render();
 }
 
@@ -2162,6 +2352,10 @@ function bind() {
       } else if (action === 'customer-filter') {
         state.customerFilter = target.dataset.filter || 'all';
         render();
+      } else if (action === 'backup') {
+        downloadBackup();
+      } else if (action === 'install') {
+        await installApp();
       } else if (action === 'refresh-rates') {
         await loadRates(true);
       } else if (action === 'use-suggest') {
@@ -2221,15 +2415,7 @@ function bind() {
     if (el) { el.addEventListener('input', updateRateSuggest); el.addEventListener('change', updateRateSuggest); }
   }
   updateRateSuggest();
-  const premium = root.querySelector('#premium-form');
-  if (premium) {
-    premium.onsubmit = (event) => event.preventDefault();
-    premium.elements.premium.onchange = () => {
-      state.premiumPct = Math.max(-20, Math.min(50, Number(premium.elements.premium.value) || 0));
-      try { localStorage.setItem(PREMIUM_KEY, String(state.premiumPct)); } catch { /* ignore */ }
-      refreshRateDom();
-    };
-  }
+  bindRateHandlers();
   if (state.view === 'today' && state.unlocked && !state.ratesLoading && (!state.rates || ratesAreStale(state.rates.fetchedAt))) loadRates();
   const amountInput = root.querySelector('form[data-kind="sale"] input[name="amountInr"]');
   const paidInput = root.querySelector('form[data-kind="sale"] input[name="paidInr"]');
@@ -2271,7 +2457,7 @@ function bind() {
     const pur = root.querySelector(`select[name="purity_${i}"]`);
     if (pur) typeSel.onchange = () => { pur.innerHTML = purityOptions(typeSel.value || 'GOLD', pur.value); };
   }
-  for (const form of root.querySelectorAll('form')) form.onsubmit = submitForm;
+  for (const form of root.querySelectorAll('form:not([data-own])')) form.onsubmit = submitForm;
 }
 
 async function onDelete(kind) {

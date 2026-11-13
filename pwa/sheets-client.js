@@ -88,6 +88,9 @@ export function explainLedgerError(raw) {
   if (/DriveApp|auth\/drive|Drive\.|photo folder/i.test(msg)) {
     return 'Photos need one more permission. In the shop Apps Script: paste the new Code.gs, run authorizeKarigar → Allow (Google Drive), then Deploy → Manage deployments → New version.';
   }
+  if (/STALE/.test(msg)) {
+    return 'Someone else saved at the same moment. Your entry is kept on this device. Tap Refresh data, check it, then save again if needed.';
+  }
   if (/wrong shop pin/i.test(msg)) {
     return 'Wrong shop PIN. Please try again. (If it was changed recently, the Sheet script needs a new deployment so the new PIN takes effect.)';
   }

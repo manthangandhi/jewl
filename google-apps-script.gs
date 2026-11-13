@@ -467,6 +467,12 @@ function loadLedger_() {
 }
 
 function saveLedger_(body) {
+  // Optimistic lock: refuse a save made from an out-of-date copy, so one phone never wipes out another's entries.
+  const stored = String(metaObject_(readRowsAsObjects_("_Meta")).lastSavedAt || "");
+  const expected = String((body && body.expect) || "");
+  if (expected && stored && expected !== stored) {
+    throw new Error("STALE: the Sheet changed since this screen last loaded it.");
+  }
   writeMeta_(body.meta || {});
   writeObjectsAsRows_("Suppliers", Array.isArray(body.suppliers) ? body.suppliers : []);
   writeObjectsAsRows_("Money", Array.isArray(body.money) ? body.money : []);

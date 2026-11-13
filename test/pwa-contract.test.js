@@ -218,7 +218,10 @@ test('the About page carries the disclaimer, privacy and support details and is 
   for (const id of ['support', 'disclaimer', 'privacy']) assert.match(about, new RegExp(`id="${id}"`));
   assert.match(about, /mailto:manthangandhi0@gmail\.com/);
   assert.match(about, /Never send your shop PIN or your license key/);
-  assert.match(about, /not Indian board or bullion rates/);
+  assert.match(about, /not your dealer’s rate/);
+  assert.match(about, /id="rates"/);
+  assert.match(about, /id="pin"/);
+  assert.match(about, /import duty/);
   assert.match(about, /not investment advice/);
   assert.match(about, /gold-api\.com/);
   const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
@@ -261,4 +264,33 @@ test('buttons, chips and the add button carry an icon beside the label', () => {
   assert.match(js, /ic\('plus'\)\}<span>Add customer<\/span>/);
   assert.match(js, /ic\('plus'\)\}<span>Add supplier<\/span>/);
   assert.match(js, /\[\['all', 'All', 'list'\], \['owe', LABEL\.weGet, 'rupee'\], \['vip', 'VIP', 'star'\], \['follow', 'Follow-up', 'bell'\]\]/);
+});
+
+test('saves are checked for staleness so one device cannot wipe out another, and unsaved rows survive a refresh', () => {
+  const gs = fs.readFileSync(path.join(pwa, 'google-apps-script.gs'), 'utf8');
+  assert.match(gs, /STALE: the Sheet changed/);
+  assert.match(gs, /expected && stored && expected !== stored/);
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /expect: state\.lastSavedAt/);
+  assert.match(js, /\/STALE\/\.test/);
+  assert.match(js, /function mergeRemote/);
+  assert.match(js, /state\.dirty = keep\.dirty/);
+  assert.match(js, /state\.lastSavedAt = now;/);
+});
+
+test('backup download, install help and PIN help are reachable', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /data-action="backup"/);
+  assert.match(js, /karigar-backup-/);
+  assert.match(js, /beforeinstallprompt/);
+  assert.match(js, /about\.html#pin/);
+  const about = fs.readFileSync(path.join(pwa, 'about.html'), 'utf8');
+  assert.match(about, /SCRIPT_PIN/);
+});
+
+test('the sign-in screen shows live rates from the public feeds before anyone unlocks', () => {
+  const js = fs.readFileSync(path.join(pwa, 'app.js'), 'utf8');
+  assert.match(js, /function loginRatesHtml/);
+  assert.match(js, /id="lock-rates"/);
+  assert.match(js, /updateLoginRates/);
 });

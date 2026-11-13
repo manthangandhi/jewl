@@ -721,3 +721,42 @@ details.adjust .premium-row { padding: var(--space-xs) 0 var(--space-md); }
 .rate-tiles [data-metal="GOLD"] .rate-name::before { background: var(--swatch-gold); }
 .rate-tiles [data-metal="SILVER"] .rate-name::before { background: var(--swatch-silver); }
 .rate-tiles [data-metal="PLATINUM"] .rate-name::before { background: var(--swatch-platinum); }
+
+/* ================= rates: units, the note, matching a dealer ================= */
+.rate-tiles li { align-content: start; }
+.rate-tiles .rate-alt { font-size: var(--text-sm); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.rate-tiles strong small { display: block; font-family: var(--font-body); font-size: var(--text-sm); color: var(--color-muted); }
+.rates-note { padding: var(--space-xs) 0 var(--space-sm); }
+.rates-note a { color: var(--color-accent); }
+.field-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.calibrate-form, .adjust-form { padding: 0 0 var(--space-md); }
+.calibrate-form .btn { margin-top: var(--space-2xs); }
+.calibrate-note { margin-top: var(--space-xs); color: var(--color-ink); }
+.adjust-form { border-top: var(--rule-hair) solid var(--color-rule); padding-top: var(--space-sm); }
+
+/* ================= sign-in: a live rate ticker and three reasons ================= */
+.lock-rates { margin: var(--space-xs) 0 0; padding: var(--space-md); border: var(--rule-hair) solid color-mix(in oklab, var(--color-paper) 28%, transparent); background: color-mix(in oklab, var(--color-paper) 8%, transparent); max-width: 480px; }
+.lock-rates-title { display: flex; align-items: center; gap: var(--space-xs); margin: 0 0 var(--space-sm); font-size: var(--text-sm); color: var(--color-paper); }
+.lock-rates-title .ic { width: 18px; height: 18px; }
+.lock-rates-title em { margin-left: auto; font-style: normal; opacity: .75; }
+.lock-rates ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-sm); }
+.lock-rates li { display: grid; gap: var(--space-3xs); color: var(--color-paper); }
+.lock-rates li > span { display: flex; align-items: center; font-size: var(--text-sm); opacity: .85; white-space: nowrap; }
+.lock-rates li > span::before { content: ""; width: 10px; height: 10px; margin-right: var(--space-xs); border-radius: 50%; background: var(--swatch-other); }
+.lock-rates [data-metal="GOLD"] > span::before { background: var(--swatch-gold); }
+.lock-rates [data-metal="SILVER"] > span::before { background: var(--swatch-silver); }
+.lock-rates strong { font-family: var(--font-display); font-weight: var(--serif-small); font-size: var(--text-xl); line-height: 1.05; font-variant-numeric: tabular-nums; }
+.lock-rates small { font-size: var(--text-xs); opacity: .7; }
+.lock-points li { align-items: flex-start; }
+.lock-points li > span { display: grid; gap: var(--space-3xs); }
+.lock-points strong { font-weight: 500; color: var(--color-paper); }
+.lock-points small { font-size: var(--text-sm); color: var(--color-paper); opacity: .78; }
+.lock-points .ic { margin-top: var(--space-3xs); flex: 0 0 auto; }
+.forgot { margin: var(--space-sm) 0 0; text-align: center; font-size: var(--text-sm); }
+.forgot a { color: var(--color-accent); }
+@media (max-width: 899px) {
+  .lock-hero { gap: var(--space-sm); padding-bottom: calc(var(--space-xl) + var(--space-md)); }
+  .lock-rates { padding: var(--space-sm); }
+  .lock-rates strong { font-size: var(--text-lg); }
+}
+@media (max-width: 380px) { .lock-rates ul { gap: var(--space-xs); } .lock-rates li > span { font-size: var(--text-xs); } }
